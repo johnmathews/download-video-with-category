@@ -1,0 +1,15 @@
+#!/bin/bash
+# Shell wrapper for the video downloader
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+if [ $# -eq 0 ]; then
+    echo "Usage: yt <youtube-url>" >&2
+    exit 1
+fi
+
+cd "$PROJECT_DIR"
+uv run yt "$@"

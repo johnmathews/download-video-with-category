@@ -1,5 +1,8 @@
 #!/usr/bin/env zsh
 # ---- youtube download -> media vm (server-side) ----
+#
+# All informational output goes to stderr.
+# On success, stdout emits the final file path (for piping to epm, etc).
 
 # Where the media VM should place final files (NFS mount already available there)
 REMOTE_FINAL_BASE="/mnt/nfs/movies/youtube"
@@ -15,49 +18,49 @@ _ytdl_on_media_vm() {
 
   if [[ -z "$category" || -z "$url" ]]; then
     # shellcheck disable=SC2154  # funcstack is a zsh built-in array
-    echo "Usage: ${funcstack[1]} <category> <url>"
+    echo "Usage: ${funcstack[1]} <category> <url>" >&2
     return 1
   fi
 
   # Validate URL format (basic check for supported video sites)
   if [[ ! "$url" =~ ^https?://(www\.)?(youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|twitch\.tv) ]]; then
-    echo "⚠️  Warning: URL doesn't look like a supported video site"
-    echo "   Supported: YouTube, Vimeo, Dailymotion, Twitch"
-    echo "   Proceeding anyway..."
+    echo "⚠️  Warning: URL doesn't look like a supported video site" >&2
+    echo "   Supported: YouTube, Vimeo, Dailymotion, Twitch" >&2
+    echo "   Proceeding anyway..." >&2
   fi
 
   # Check cookies file exists and has content
   if [[ ! -f "$LOCAL_YT_COOKIES" ]]; then
-    echo "❌ Cookies file not found:"
-    echo "   $LOCAL_YT_COOKIES"
-    echo "Export youtube.com cookies to this file (Netscape cookies.txt)."
+    echo "❌ Cookies file not found:" >&2
+    echo "   $LOCAL_YT_COOKIES" >&2
+    echo "Export youtube.com cookies to this file (Netscape cookies.txt)." >&2
     return 1
   fi
 
   if [[ ! -s "$LOCAL_YT_COOKIES" ]]; then
-    echo "❌ Cookies file is empty:"
-    echo "   $LOCAL_YT_COOKIES"
+    echo "❌ Cookies file is empty:" >&2
+    echo "   $LOCAL_YT_COOKIES" >&2
     return 1
   fi
 
   # Warn if cookies are older than 7 days (likely stale)
   local cookie_age_days=$(( ($(date +%s) - $(stat -f %m "$LOCAL_YT_COOKIES" 2>/dev/null || stat -c %Y "$LOCAL_YT_COOKIES")) / 86400 ))
   if [[ $cookie_age_days -gt 7 ]]; then
-    echo "⚠️  Warning: Cookies file is $cookie_age_days days old (may be stale)"
-    echo "   Consider re-exporting fresh cookies from your browser"
+    echo "⚠️  Warning: Cookies file is $cookie_age_days days old (may be stale)" >&2
+    echo "   Consider re-exporting fresh cookies from your browser" >&2
   fi
 
   # Check if yt-dlp is installed on remote
   if ! /usr/bin/ssh -o BatchMode=yes media 'command -v yt-dlp >/dev/null 2>&1'; then
-    echo "❌ yt-dlp not found on media VM"
-    echo "   Install it with: ssh media 'pip install yt-dlp'"
+    echo "❌ yt-dlp not found on media VM" >&2
+    echo "   Install it with: ssh media 'pip install yt-dlp'" >&2
     return 1
   fi
 
   # Remote temp paths
   local remote_tmpdir
   remote_tmpdir="$(/usr/bin/ssh -o BatchMode=yes media 'mktemp -d /tmp/yt.XXXXXX')" || {
-    echo "❌ Failed to create remote temp dir"
+    echo "❌ Failed to create remote temp dir" >&2
     return 1
   }
 
@@ -68,10 +71,10 @@ _ytdl_on_media_vm() {
   local remote_cookie="$remote_tmpdir/cookies.txt"
 
   # Upload cookies (lock down perms on remote)
-  echo "🍪 Copying cookies to media VM..."
+  echo "🍪 Copying cookies to media VM..." >&2
   # shellcheck disable=SC2029  # Intentional client-side expansion
   /usr/bin/scp -q "$LOCAL_YT_COOKIES" "media:$remote_cookie" || {
-    echo "❌ Failed to copy cookies to media VM"
+    echo "❌ Failed to copy cookies to media VM" >&2
     # shellcheck disable=SC2029  # Intentional client-side expansion
     /usr/bin/ssh media "rm -rf '$remote_tmpdir' 2>/dev/null || true"
     return 1
@@ -82,12 +85,12 @@ _ytdl_on_media_vm() {
   # Build remote final dir
   local remote_final_dir="${REMOTE_FINAL_BASE}/${category}"
 
-  echo "⏬ Downloading on media VM to: $remote_tmpdir"
-  echo "📦 Final destination: $remote_final_dir"
-  echo ""
+  echo "⏬ Downloading on media VM to: $remote_tmpdir" >&2
+  echo "📦 Final destination: $remote_final_dir" >&2
+  echo "" >&2
 
   # Fetch video info for display and duplicate checking
-  echo "🔍 Fetching video info..."
+  echo "🔍 Fetching video info..." >&2
   local video_info
   video_info="$(/usr/bin/ssh -o BatchMode=yes media "yt-dlp --remote-components ejs:github --print '%(id)s' --print '%(title)s' --print '%(height)sp' --print '%(filesize_approx)s' --cookies $(printf '%q' "$remote_cookie") $(printf '%q' "$url") 2>/dev/null" || printf 'unknown\nUnknown Video\n0p\n0')"
 
@@ -119,55 +122,58 @@ _ytdl_on_media_vm() {
     fi
   fi
 
-  echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "📹 VIDEO: $video_title"
-  echo "🆔 ID: $video_id"
-  echo "📊 Quality: $new_quality"
-  echo "📦 Size: ~$filesize_display"
-  echo "📁 Category: $category"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
+  echo "" >&2
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+  echo "📹 VIDEO: $video_title" >&2
+  echo "🆔 ID: $video_id" >&2
+  echo "📊 Quality: $new_quality" >&2
+  echo "📦 Size: ~$filesize_display" >&2
+  echo "📁 Category: $category" >&2
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+  echo "" >&2
 
   # Check if video already exists
-  echo "🔎 Checking for existing downloads..."
+  echo "🔎 Checking for existing downloads..." >&2
   local existing_file
   existing_file="$(/usr/bin/ssh -o BatchMode=yes media "find $(printf '%q' "$remote_final_dir") -type f -name '*\\[${video_id}\\]*' 2>/dev/null | head -1" || echo "")"
 
   if [[ -n "$existing_file" ]]; then
-    echo "⚠️  Found existing file: $(basename "$existing_file")"
+    echo "⚠️  Found existing file: $(basename "$existing_file")" >&2
 
     # Get quality of existing file using ffprobe
     local existing_quality
     existing_quality="$(/usr/bin/ssh -o BatchMode=yes media "ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 $(printf '%q' "$existing_file") 2>/dev/null" || echo "0")"
     existing_quality="${existing_quality}p"
 
-    echo "   Existing quality: $existing_quality"
-    echo "   New quality: $new_quality"
+    echo "   Existing quality: $existing_quality" >&2
+    echo "   New quality: $new_quality" >&2
 
     # Compare qualities (extract numeric values)
     local existing_num="${existing_quality%p}"
     local new_num="${new_quality%p}"
 
     if [[ "$new_num" -le "$existing_num" ]]; then
-      echo ""
-      echo "❌ Skipping download - existing file has equal or better quality"
-      echo "   To force re-download, delete: $existing_file"
+      echo "" >&2
+      echo "❌ Skipping download - existing file has equal or better quality" >&2
+      echo "   To force re-download, delete: $existing_file" >&2
       # Clear trap and cleanup
       trap - INT TERM
       /usr/bin/ssh media "rm -rf '$remote_tmpdir' 2>/dev/null || true"
       return 0
     else
-      echo ""
-      echo "✅ New quality is better - proceeding with download"
-      echo "   Old file will be replaced"
+      echo "" >&2
+      echo "✅ New quality is better - proceeding with download" >&2
+      echo "   Old file will be replaced" >&2
     fi
   else
-    echo "✓ No existing download found"
+    echo "✓ No existing download found" >&2
   fi
-  echo ""
+  echo "" >&2
 
   # Run yt-dlp remotely, then move results to final dir
+  #
+  # Remote stdout is reserved for the final video file path.
+  # All progress/info goes to stderr (yt-dlp >&2, echo >&2).
   local remote_script='
 set -euo pipefail
 
@@ -192,36 +198,48 @@ yt-dlp \
   --merge-output-format mkv \
   --restrict-filenames \
   -o "$tmpdir/%(uploader)s-%(title)s-[%(id)s].%(ext)s" \
-  "$url"
+  "$url" >&2
 
 shopt -s nullglob
 files=("$tmpdir"/*.{mkv,mp4,jpg,webp,srt,vtt,json,nfo} "$tmpdir"/*info.json)
 if (( ${#files[@]} == 0 )); then
-  echo "❌ No output files found in $tmpdir"
-  ls -la "$tmpdir" || true
+  echo "❌ No output files found in $tmpdir" >&2
+  ls -la "$tmpdir" >&2 || true
   exit 2
 fi
 
-echo "✅ Download complete. Moving to final dir..."
-mv -v "${files[@]}" "$finaldir/"
+echo "✅ Download complete. Moving to final dir..." >&2
+mv -v "${files[@]}" "$finaldir/" >&2
+
+# Output the video file path to stdout (for piping)
+for f in "${files[@]}"; do
+  case "$f" in
+    *.mkv|*.mp4) echo "$finaldir/$(basename "$f")" ;;
+  esac
+done
 
 # cleanup secrets + tmp
 rm -f "$cookie" || true
 rmdir "$tmpdir" 2>/dev/null || rm -rf "$tmpdir"
 
-echo "✅ Done."
+echo "✅ Done." >&2
 '
 
-  if /usr/bin/ssh -o BatchMode=yes media "bash -s -- $(printf '%q' "$remote_tmpdir") $(printf '%q' "$remote_cookie") $(printf '%q' "$remote_final_dir") $(printf '%q' "$url")" <<<"$remote_script"; then
+  local final_path
+  if final_path="$(/usr/bin/ssh -o BatchMode=yes media "bash -s -- $(printf '%q' "$remote_tmpdir") $(printf '%q' "$remote_cookie") $(printf '%q' "$remote_final_dir") $(printf '%q' "$url")" <<<"$remote_script")"; then
     # Clear trap and cleanup manually on success
     trap - INT TERM
     /usr/bin/ssh media "rm -rf '$remote_tmpdir' 2>/dev/null || true"
-    echo ""
-    echo "✅ Successfully downloaded to: $remote_final_dir"
+    echo "" >&2
+    echo "✅ Successfully downloaded to: $remote_final_dir" >&2
+    # Output the final file path to stdout for piping
+    if [[ -n "$final_path" ]]; then
+      echo "$final_path"
+    fi
     return 0
   else
     local exit_code=$?
-    echo "❌ Remote job failed (exit code: $exit_code)"
+    echo "❌ Remote job failed (exit code: $exit_code)" >&2
     # Clear trap and cleanup manually on failure
     trap - INT TERM
     # shellcheck disable=SC2029  # Intentional client-side expansion
@@ -232,7 +250,7 @@ echo "✅ Done."
 
 # Help text function
 _yt_show_help() {
-  cat <<'EOF'
+  cat >&2 <<'EOF'
 yt - Download videos to media VM with categorization
 
 USAGE:
@@ -243,7 +261,7 @@ USAGE:
 DESCRIPTION:
   Downloads YouTube (and other) videos directly on the media VM and saves them to the correct subdirectory in the movies dataset.
 
-  The script copies a youtube cookie from ~/.config/yt-dlp/cookies/cookies.txt onto the media VM. 
+  The script copies a youtube cookie from ~/.config/yt-dlp/cookies/cookies.txt onto the media VM.
   Use a browser plugin to copy the cookie from a browser to the local config directory.
 
   The script handles:
@@ -269,6 +287,9 @@ EXAMPLES:
   yt -g "https://youtu.be/C4TVr2NtEg8"
   yt -m "https://youtube.com/watch?v=dQw4w9WgXcQ"
   yt --category training "https://youtu.be/C4TVr2NtEg8"
+
+  Pipe to epm for photo extraction:
+    yt -g "https://youtu.be/C4TVr2NtEg8" | epm
 
 REQUIREMENTS:
   - YouTube cookies must be exported to: ~/.config/yt-dlp/cookies/cookies.txt
@@ -319,22 +340,22 @@ yt() {
   fi
 
   if [[ -z "$category" ]]; then
-    echo "❌ Error: Category shortcut is required"
-    echo ""
-    echo "Usage: yt -g|-y|-c|-m|-h|-t|-e URL"
-    echo "   or: yt --category CATEGORY URL"
-    echo ""
-    echo "Run 'yt --help' for more information"
+    echo "❌ Error: Category shortcut is required" >&2
+    echo "" >&2
+    echo "Usage: yt -g|-y|-c|-m|-h|-t|-e URL" >&2
+    echo "   or: yt --category CATEGORY URL" >&2
+    echo "" >&2
+    echo "Run 'yt --help' for more information" >&2
     return 1
   fi
 
   # Validate category
   if [[ ! ${valid_categories[(ie)$category]} -le ${#valid_categories} ]]; then
-    echo "❌ Error: Invalid category '$category'"
-    echo ""
-    echo "Valid categories: ${(j:, :)valid_categories}"
-    echo ""
-    echo "Run 'yt --help' for more information"
+    echo "❌ Error: Invalid category '$category'" >&2
+    echo "" >&2
+    echo "Valid categories: ${(j:, :)valid_categories}" >&2
+    echo "" >&2
+    echo "Run 'yt --help' for more information" >&2
     return 1
   fi
 
@@ -342,11 +363,11 @@ yt() {
   local url="$1"
 
   if [[ -z "$url" ]]; then
-    echo "❌ Error: URL is required"
-    echo ""
-    echo "Usage: yt -g|-y|-c|-m|-h|-t|-e URL"
-    echo ""
-    echo "Run 'yt --help' for more information"
+    echo "❌ Error: URL is required" >&2
+    echo "" >&2
+    echo "Usage: yt -g|-y|-c|-m|-h|-t|-e URL" >&2
+    echo "" >&2
+    echo "Run 'yt --help' for more information" >&2
     return 1
   fi
 

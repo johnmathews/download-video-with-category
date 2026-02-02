@@ -1,18 +1,50 @@
-# About
+# yt - Download videos to media VM
 
-This project will very simply use yt-dlp to download a video of the highest
-possible audio and video quality.
-The script will be run from the command line and the youtube share url will be provided.
+A shell function that downloads YouTube (and other) videos directly on the media VM via SSH, saving them to categorized directories on the NFS-mounted movies dataset.
 
-e.g `yt https://youtu.be/u6LztryAUUA?si=-6VFb1454VSt-R2Z`
+## How it works
 
-the video file will be saved into ~/Desktop/videos
+1. Copies browser cookies from your Mac to the media VM over SSH
+2. Runs yt-dlp on the media VM to download the video
+3. Embeds metadata, chapters, thumbnails, and subtitles
+4. Moves the finished file to `/mnt/nfs/movies/youtube/{category}/`
+5. Cleans up temp files on the media VM
 
-youtube subtitles are also downloaded (auto generated and normal, in english and dutch)
-video thumbnail and metadata are also downloaded.
+Duplicate detection compares video quality via ffprobe and skips downloads when the existing file is equal or better quality.
 
-`uv` is used to manage python virtual envs, scripts and dependencies.
+## Categories
 
-a shell wrapper is used so that the script can be invoked from a zsh terminal session, even though the script itself is written in python.
+```
+Flag  Name              Description
+-g    training          Training and gym/workout videos
+-y    youtube           General YouTube content
+-c    create            Creative/maker content
+-m    music             Music videos and performances
+-h    humanity          Humanities and cultural content
+-t    travel            Travel videos and vlogs
+-e    math+engineering  Math and engineering content
+```
 
-the most recent LTS version of python is used.
+## Usage
+
+```
+yt -g "https://youtu.be/C4TVr2NtEg8"
+yt -m "https://youtube.com/watch?v=dQw4w9WgXcQ"
+yt --category training "https://youtu.be/C4TVr2NtEg8"
+yt --help
+```
+
+## Setup
+
+Source the script in your shell profile:
+
+```sh
+source "$HOME/projects/photo-video/download-video/yt.sh"
+```
+
+## Requirements
+
+- SSH access to `media` host (configured in `~/.ssh/config`)
+- YouTube cookies exported to `~/.config/yt-dlp/cookies/cookies.txt` (Netscape cookies.txt format, use a browser extension)
+- yt-dlp installed on the media VM
+- ffprobe on the media VM (for duplicate quality comparison)

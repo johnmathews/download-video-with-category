@@ -156,6 +156,8 @@ _ytdl_on_media_vm() {
       echo "" >&2
       echo "❌ Skipping download - existing file has equal or better quality" >&2
       echo "   To force re-download, delete: $existing_file" >&2
+      # Emit existing path to stdout so piping (e.g. yt ... | epm) still works
+      echo "$existing_file"
       # Clear trap and cleanup
       trap - INT TERM
       /usr/bin/ssh media "rm -rf '$remote_tmpdir' 2>/dev/null || true"

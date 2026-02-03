@@ -10,7 +10,7 @@ A shell function that downloads YouTube (and other) videos directly on the media
 4. Moves the finished file to `/mnt/nfs/movies/youtube/{category}/`
 5. Cleans up temp files on the media VM
 
-Duplicate detection compares video quality via ffprobe and skips downloads when the existing file is equal or better quality.
+Duplicate detection compares video quality via ffprobe and skips downloads when the existing file is equal or better quality. The downloaded (or existing) file path is emitted to stdout in both cases, so piping works as expected (e.g. `yt -g "..." | epm`).
 
 ## Categories
 

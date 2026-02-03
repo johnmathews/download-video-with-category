@@ -4,7 +4,11 @@
       "Bash(chmod:*)",
       "Bash(uv sync)",
       "Bash(./bin/yt:*)",
-      "Bash(ffprobe -hide_banner ~/Desktop/videos/\"A Photographer''s Portrait ｜ Ep 8 David Latoszewski.mkv\")"
+      "Bash(ffprobe -hide_banner ~/Desktop/videos/\"A Photographer''s Portrait ｜ Ep 8 David Latoszewski.mkv\")",
+      "Bash(alias:*)",
+      "Bash(command -v:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

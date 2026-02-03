@@ -10,7 +10,7 @@ A shell function that downloads YouTube (and other) videos directly on the media
 4. Moves the finished file to `/mnt/nfs/movies/youtube/{category}/`
 5. Cleans up temp files on the media VM
 
-Duplicate detection compares video quality via ffprobe and skips downloads when the existing file is equal or better quality. The downloaded (or existing) file path is emitted to stdout in both cases, so piping works as expected (e.g. `yt -g "..." | epm`).
+Duplicate detection compares video quality via ffprobe and skips downloads when the existing file is equal or better quality.
 
 ## Categories
 
@@ -25,6 +25,8 @@ Flag  Name              Description
 -e    math+engineering  Math and engineering content
 ```
 
+Note: `-h` is the shortcut for "humanity", not help. Use `yt --help` for help.
+
 ## Usage
 
 ```
@@ -33,6 +35,16 @@ yt -m "https://youtube.com/watch?v=dQw4w9WgXcQ"
 yt --category training "https://youtu.be/C4TVr2NtEg8"
 yt --help
 ```
+
+## Piping
+
+Only the final file path is emitted to stdout (all progress and status output goes to stderr). This means `yt` works in pipelines:
+
+```
+yt -g "https://youtu.be/C4TVr2NtEg8" | epm
+```
+
+The path is emitted whether the video was freshly downloaded or skipped as a duplicate.
 
 ## Setup
 

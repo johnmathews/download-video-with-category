@@ -64,23 +64,22 @@ _ytdl_on_media_vm() {
     return 1
   }
 
+  # Pre-escape for safe embedding in SSH commands and trap strings
+  local _q_tmpdir=$(printf '%q' "$remote_tmpdir")
+
   # Setup cleanup trap to ensure temp files are removed even on interrupt
-  trap "/usr/bin/ssh media \"rm -rf '$remote_tmpdir' 2>/dev/null || true\" 2>/dev/null; trap - INT TERM; return 130" INT TERM
+  trap "/usr/bin/ssh media \"rm -rf $_q_tmpdir 2>/dev/null || true\" 2>/dev/null; trap - INT TERM; return 130" INT TERM
 
   # Put cookie inside tempdir to avoid collisions
   local remote_cookie="$remote_tmpdir/cookies.txt"
 
-  # Upload cookies (lock down perms on remote)
+  # Upload cookies (atomic with restrictive permissions to avoid permission window)
   echo "🍪 Copying cookies to media VM..." >&2
-  # shellcheck disable=SC2029  # Intentional client-side expansion
-  /usr/bin/scp -q "$LOCAL_YT_COOKIES" "media:$remote_cookie" || {
+  /usr/bin/ssh media "umask 077 && cat > $(printf '%q' "$remote_cookie")" < "$LOCAL_YT_COOKIES" || {
     echo "❌ Failed to copy cookies to media VM" >&2
-    # shellcheck disable=SC2029  # Intentional client-side expansion
-    /usr/bin/ssh media "rm -rf '$remote_tmpdir' 2>/dev/null || true"
+    /usr/bin/ssh media "rm -rf $_q_tmpdir 2>/dev/null || true"
     return 1
   }
-  # shellcheck disable=SC2029  # Intentional client-side expansion
-  /usr/bin/ssh media "chmod 600 '$remote_cookie' >/dev/null 2>&1 || true" || true
 
   # Build remote final dir
   local remote_final_dir="${REMOTE_FINAL_BASE}/${category}"
@@ -102,7 +101,7 @@ _ytdl_on_media_vm() {
 
   # Format filesize with smart rounding
   local filesize_display="Unknown"
-  if [[ -n "$filesize_bytes" && "$filesize_bytes" != "0" && "$filesize_bytes" != "None" ]]; then
+  if [[ "$filesize_bytes" =~ ^[0-9]+$ && "$filesize_bytes" != "0" ]]; then
     local size_mb=$((filesize_bytes / 1048576))  # Convert to MB
     if [[ $size_mb -lt 1024 ]]; then
       # Less than 1 GB - show in MB
@@ -160,7 +159,7 @@ _ytdl_on_media_vm() {
       echo "$existing_file"
       # Clear trap and cleanup
       trap - INT TERM
-      /usr/bin/ssh media "rm -rf '$remote_tmpdir' 2>/dev/null || true"
+      /usr/bin/ssh media "rm -rf $_q_tmpdir 2>/dev/null || true"
       return 0
     else
       echo "" >&2
@@ -231,7 +230,7 @@ echo "✅ Done." >&2
   if final_path="$(/usr/bin/ssh -o BatchMode=yes media "bash -s -- $(printf '%q' "$remote_tmpdir") $(printf '%q' "$remote_cookie") $(printf '%q' "$remote_final_dir") $(printf '%q' "$url")" <<<"$remote_script")"; then
     # Clear trap and cleanup manually on success
     trap - INT TERM
-    /usr/bin/ssh media "rm -rf '$remote_tmpdir' 2>/dev/null || true"
+    /usr/bin/ssh media "rm -rf $_q_tmpdir 2>/dev/null || true"
     echo "" >&2
     echo "✅ Successfully downloaded to: $remote_final_dir" >&2
     # Output the final file path to stdout for piping
@@ -244,8 +243,7 @@ echo "✅ Done." >&2
     echo "❌ Remote job failed (exit code: $exit_code)" >&2
     # Clear trap and cleanup manually on failure
     trap - INT TERM
-    # shellcheck disable=SC2029  # Intentional client-side expansion
-    /usr/bin/ssh media "rm -rf '$remote_tmpdir' 2>/dev/null || true"
+    /usr/bin/ssh media "rm -rf $_q_tmpdir 2>/dev/null || true"
     return 1
   fi
 }

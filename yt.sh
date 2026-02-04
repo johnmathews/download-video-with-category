@@ -99,6 +99,12 @@ _ytdl_on_media_vm() {
   local new_quality="${info_lines[3]}"
   local filesize_bytes="${info_lines[4]}"
 
+  if [[ "$video_id" == "unknown" ]]; then
+    echo "⚠️  Warning: Could not fetch video info — yt-dlp may be outdated" >&2
+    echo "   Run 'yt --update' to update yt-dlp on the media VM" >&2
+    echo "" >&2
+  fi
+
   # Format filesize with smart rounding
   local filesize_display="Unknown"
   if [[ "$filesize_bytes" =~ ^[0-9]+$ && "$filesize_bytes" != "0" ]]; then
@@ -240,7 +246,12 @@ echo "✅ Done." >&2
     return 0
   else
     local exit_code=$?
-    echo "❌ Remote job failed (exit code: $exit_code)" >&2
+    echo "❌ Remote download failed (exit code: $exit_code)" >&2
+    echo "" >&2
+    echo "Troubleshooting steps:" >&2
+    echo "  1. Update yt-dlp:     yt --update" >&2
+    echo "  2. Refresh cookies:   re-export cookies to $LOCAL_YT_COOKIES" >&2
+    echo "  3. Check URL:         open the URL in a browser to verify it's valid" >&2
     # Clear trap and cleanup manually on failure
     trap - INT TERM
     /usr/bin/ssh media "rm -rf $_q_tmpdir 2>/dev/null || true"
@@ -256,6 +267,7 @@ yt - Download videos to media VM with categorization
 USAGE:
   yt -SHORTCUT URL
   yt --category CATEGORY URL
+  yt --update
   yt --help
 
 DESCRIPTION:
@@ -281,12 +293,16 @@ CATEGORIES:
 
 OPTIONS:
   --category CATEGORY    Specify category by name (alternative to shortcuts)
+  --update               Update yt-dlp on the media VM
   --help                 Show this help message
 
 EXAMPLES:
   yt -g "https://youtu.be/C4TVr2NtEg8"
   yt -m "https://youtube.com/watch?v=dQw4w9WgXcQ"
   yt --category training "https://youtu.be/C4TVr2NtEg8"
+
+  Update yt-dlp on the media VM:
+    yt --update
 
   Pipe to epm for photo extraction:
     yt -g "https://youtu.be/C4TVr2NtEg8" | epm
@@ -317,7 +333,14 @@ yt() {
 
   # Parse flags using zparseopts
   local -A opts
-  zparseopts -D -E -A opts -- g y c m h t e -category: -help
+  zparseopts -D -E -A opts -- g y c m h t e -category: -help -update
+
+  # Handle --update before anything else
+  if (( ${+opts[--update]} )); then
+    echo "🔄 Updating yt-dlp on media VM..." >&2
+    /usr/bin/ssh -o BatchMode=yes media 'yt-dlp -U' >&2
+    return $?
+  fi
 
   # Map shortcut flags to categories
   local category

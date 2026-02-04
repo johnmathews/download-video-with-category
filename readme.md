@@ -33,6 +33,7 @@ Note: `-h` is the shortcut for "humanity", not help. Use `yt --help` for help.
 yt -g "https://youtu.be/C4TVr2NtEg8"
 yt -m "https://youtube.com/watch?v=dQw4w9WgXcQ"
 yt --category training "https://youtu.be/C4TVr2NtEg8"
+yt --update
 yt --help
 ```
 
@@ -45,6 +46,16 @@ yt -g "https://youtu.be/C4TVr2NtEg8" | epm
 ```
 
 The path is emitted whether the video was freshly downloaded or skipped as a duplicate.
+
+## Updating yt-dlp
+
+If downloads fail (especially with format selection errors), yt-dlp on the media VM likely needs updating:
+
+```
+yt --update
+```
+
+The script will also suggest this when it can't fetch video info or when a download fails.
 
 ## Setup
 

@@ -55,6 +55,8 @@ If downloads fail (especially with format selection errors), yt-dlp on the media
 yt --update
 ```
 
+This runs `sudo apt update && sudo apt install --only-upgrade yt-dlp` on the media VM via SSH. A TTY is allocated for the sudo prompt.
+
 The script will also suggest this when it can't fetch video info or when a download fails.
 
 ## Setup

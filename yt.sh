@@ -338,7 +338,7 @@ yt() {
   # Handle --update before anything else
   if (( ${+opts[--update]} )); then
     echo "🔄 Updating yt-dlp on media VM..." >&2
-    /usr/bin/ssh -o BatchMode=yes media 'yt-dlp -U 2>&1 || pip3 install -U yt-dlp' >&2
+    /usr/bin/ssh -o BatchMode=yes -t media 'sudo apt update && sudo apt install --only-upgrade yt-dlp' >&2
     return $?
   fi
 

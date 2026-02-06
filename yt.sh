@@ -197,6 +197,7 @@ yt-dlp \
   --embed-metadata \
   --embed-chapters \
   --embed-thumbnail \
+  --write-thumbnail \
   --convert-thumbnails jpg \
   --sub-langs "en.*,nl,de,es" \
   --write-auto-subs \

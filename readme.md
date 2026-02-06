@@ -6,7 +6,7 @@ A shell function that downloads YouTube (and other) videos directly on the media
 
 1. Copies browser cookies from your Mac to the media VM over SSH
 2. Runs yt-dlp on the media VM to download the video
-3. Embeds metadata, chapters, thumbnails, and subtitles
+3. Embeds metadata, chapters, thumbnails, and subtitles; also writes a sidecar `.jpg` thumbnail for media servers (Plex, Jellyfin) that ignore embedded MKV thumbnails
 4. Moves the finished file to `/mnt/nfs/movies/youtube/{category}/`
 5. Cleans up temp files on the media VM
 

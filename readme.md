@@ -1,16 +1,18 @@
 # yt - Download videos to media VM
 
-A shell function that downloads YouTube (and other) videos directly on the media VM via SSH, saving them to categorized directories on the NFS-mounted movies dataset.
+A shell function that downloads YouTube (and other) videos directly on the media VM via SSH, saving them to categorized
+directories on the NFS-mounted movies dataset.
 
 ## How it works
 
 1. Copies browser cookies from your Mac to the media VM over SSH
 2. Runs yt-dlp on the media VM to download the video
-3. Embeds metadata, chapters, thumbnails, and subtitles; also writes a sidecar `.jpg` thumbnail for media servers (Plex, Jellyfin) that ignore embedded MKV thumbnails
+3. Embeds metadata, chapters, thumbnails, and subtitles.
 4. Moves the finished file to `/mnt/nfs/movies/youtube/{category}/`
 5. Cleans up temp files on the media VM
 
-Duplicate detection compares video quality via ffprobe and skips downloads when the existing file is equal or better quality.
+Duplicate detection compares video quality via ffprobe and skips downloads when the existing file is equal or better
+quality.
 
 ## Categories
 
@@ -39,7 +41,8 @@ yt --help
 
 ## Piping
 
-Only the final file path is emitted to stdout (all progress and status output goes to stderr). This means `yt` works in pipelines:
+Only the final file path is emitted to stdout (all progress and status output goes to stderr). This means `yt` works in
+pipelines:
 
 ```
 yt -g "https://youtu.be/C4TVr2NtEg8" | epm
@@ -55,7 +58,8 @@ If downloads fail (especially with format selection errors), yt-dlp on the media
 yt --update
 ```
 
-This runs `sudo apt update && sudo apt install --only-upgrade yt-dlp` on the media VM via SSH. A TTY is allocated for the sudo prompt.
+This runs `sudo apt update && sudo apt install --only-upgrade yt-dlp` on the media VM via SSH. A TTY is allocated for the
+sudo prompt.
 
 The script will also suggest this when it can't fetch video info or when a download fails.
 
@@ -70,6 +74,7 @@ source "$HOME/projects/photo-video/download-video/yt.sh"
 ## Requirements
 
 - SSH access to `media` host (configured in `~/.ssh/config`)
-- YouTube cookies exported to `~/.config/yt-dlp/cookies/cookies.txt` (Netscape cookies.txt format, use a browser extension)
+- YouTube cookies exported to `~/.config/yt-dlp/cookies/cookies.txt` (Netscape cookies.txt format, use a browser
+  extension)
 - yt-dlp installed on the media VM
 - ffprobe on the media VM (for duplicate quality comparison)

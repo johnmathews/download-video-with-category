@@ -48,7 +48,7 @@ Each download gets a unique staging subdir derived from the `/tmp` tempdir name 
 
 ## Adding a New Category
 
-1. Add the flag mapping in `yt()` (around line 347) and in the `zparseopts` call (line 336)
-2. Add the category name to the `valid_categories` array (line 326)
+1. Add the flag mapping in `yt()` (around line 414) and in the `zparseopts` call (line 403)
+2. Add the category name to the `valid_categories` array (line 393)
 3. Add to `_yt_show_help()` categories section
 4. Update `readme.md`

@@ -19,6 +19,18 @@ LOCAL_YT_COOKIES="$HOME/.config/yt-dlp/cookies/cookies.txt"
 _ytdl_on_media_vm() {
   setopt local_options pipefail
 
+  local _yt_start=$SECONDS
+
+  # Format elapsed time as human-readable string (e.g. "1m 23s", "45s")
+  _yt_elapsed() {
+    local secs=$(( SECONDS - _yt_start ))
+    if (( secs >= 60 )); then
+      printf '%dm %ds' $((secs / 60)) $((secs % 60))
+    else
+      printf '%ds' $secs
+    fi
+  }
+
   local category="$1"   # e.g. youtube, gym, create, music
   local url="$2"
 
@@ -85,7 +97,7 @@ _ytdl_on_media_vm() {
   local remote_cookie="$remote_tmpdir/cookies.txt"
 
   # Upload cookies (atomic with restrictive permissions to avoid permission window)
-  echo "🍪 Copying cookies to media VM..." >&2
+  echo "🍪 [$(_yt_elapsed)] Copying cookies to media VM..." >&2
   /usr/bin/ssh media "umask 077 && cat > $(printf '%q' "$remote_cookie")" < "$LOCAL_YT_COOKIES" || {
     echo "❌ Failed to copy cookies to media VM" >&2
     /usr/bin/ssh media "rm -rf $_q_tmpdir 2>/dev/null || true"
@@ -101,7 +113,7 @@ _ytdl_on_media_vm() {
   echo "" >&2
 
   # Fetch video info for display and duplicate checking
-  echo "🔍 Fetching video info..." >&2
+  echo "🔍 [$(_yt_elapsed)] Fetching video info..." >&2
   local video_info
   video_info="$(/usr/bin/ssh -o BatchMode=yes media "yt-dlp --remote-components ejs:github --print '%(id)s' --print '%(title)s' --print '%(height)sp' --print '%(filesize_approx)s' --cookies $(printf '%q' "$remote_cookie") $(printf '%q' "$url") 2>/dev/null" || printf 'unknown\nUnknown Video\n0p\n0')"
 
@@ -150,7 +162,7 @@ _ytdl_on_media_vm() {
   echo "" >&2
 
   # Check if video already exists
-  echo "🔎 Checking for existing downloads..." >&2
+  echo "🔎 [$(_yt_elapsed)] Checking for existing downloads..." >&2
   local existing_file
   existing_file="$(/usr/bin/ssh -o BatchMode=yes media "find $(printf '%q' "$remote_final_dir") -type f -name '*\\[${video_id}\\]*' 2>/dev/null | head -1" || echo "")"
 
@@ -248,7 +260,7 @@ echo "✅ Staged to SSD." >&2
   local video_basenames
   if video_basenames="$(/usr/bin/ssh -o BatchMode=yes media "bash -s -- $(printf '%q' "$remote_tmpdir") $(printf '%q' "$remote_cookie") $(printf '%q' "$remote_staging_dir") $(printf '%q' "$url")" <<<"$remote_script")"; then
     # tmpdir cleaned by remote_script; staging dir still has files for stage 2
-    :
+    echo "⏱️  [$(_yt_elapsed)] Download + SSD staging complete" >&2
   else
     local exit_code=$?
     echo "❌ Remote download failed (exit code: $exit_code)" >&2
@@ -268,7 +280,7 @@ echo "✅ Staged to SSD." >&2
   local nas_final_dir="${NAS_FINAL_BASE}/${category}"
 
   echo "" >&2
-  echo "📀 Transferring to HDD on NAS..." >&2
+  echo "📀 [$(_yt_elapsed)] Transferring to HDD on NAS..." >&2
 
   local nas_script='
 set -euo pipefail
@@ -282,7 +294,7 @@ if [ ! -d "$staging_dir" ]; then
 fi
 
 mkdir -p "$final_dir"
-rsync --info=progress2 --remove-source-files "$staging_dir/" "$final_dir/" >&2
+rsync -a --omit-dir-times --info=progress2 --remove-source-files "$staging_dir/" "$final_dir/" >&2
 rmdir "$staging_dir" 2>/dev/null || true
 
 echo "✅ Done." >&2
@@ -292,7 +304,7 @@ echo "✅ Done." >&2
     # Clear trap — staging dir cleaned by nas_script, tmpdir cleaned by remote_script
     trap - INT TERM
     echo "" >&2
-    echo "✅ Successfully downloaded to: $remote_final_dir" >&2
+    echo "✅ [$(_yt_elapsed)] Successfully downloaded to: $remote_final_dir" >&2
     # Output the final file paths to stdout for piping
     if [[ -n "$video_basenames" ]]; then
       local line

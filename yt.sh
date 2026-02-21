@@ -7,6 +7,12 @@
 # Where the media VM should place final files (NFS mount already available there)
 REMOTE_FINAL_BASE="/mnt/nfs/movies/youtube"
 
+# Two-stage SSD-staged transfer: media VM → SSD NFS → HDD (NAS-local copy)
+REMOTE_STAGING_BASE="/mnt/nfs/downloads/yt-staging"  # SSD NFS as seen from media VM
+NAS_STAGING_BASE="/mnt/swift/downloads/yt-staging"    # Same dir as seen from NAS locally
+NAS_FINAL_BASE="/mnt/tank/movies/youtube"             # HDD as seen from NAS locally
+NAS_SSH_HOST="nas"
+
 # Local cookies file on your Mac (Netscape cookies.txt format)
 LOCAL_YT_COOKIES="$HOME/.config/yt-dlp/cookies/cookies.txt"
 
@@ -67,8 +73,13 @@ _ytdl_on_media_vm() {
   # Pre-escape for safe embedding in SSH commands and trap strings
   local _q_tmpdir=$(printf '%q' "$remote_tmpdir")
 
+  # Derive a unique SSD staging subdir from the tmpdir basename (e.g. yt.a1b2c3)
+  local staging_subdir="$(basename "$remote_tmpdir")"
+  local remote_staging_dir="${REMOTE_STAGING_BASE}/${staging_subdir}"
+  local _q_staging_dir=$(printf '%q' "$remote_staging_dir")
+
   # Setup cleanup trap to ensure temp files are removed even on interrupt
-  trap "/usr/bin/ssh media \"rm -rf $_q_tmpdir 2>/dev/null || true\" 2>/dev/null; trap - INT TERM; return 130" INT TERM
+  trap "/usr/bin/ssh media \"rm -rf $_q_tmpdir $_q_staging_dir 2>/dev/null || true\" 2>/dev/null; trap - INT TERM; return 130" INT TERM
 
   # Put cookie inside tempdir to avoid collisions
   local remote_cookie="$remote_tmpdir/cookies.txt"
@@ -85,6 +96,7 @@ _ytdl_on_media_vm() {
   local remote_final_dir="${REMOTE_FINAL_BASE}/${category}"
 
   echo "⏬ Downloading on media VM to: $remote_tmpdir" >&2
+  echo "📦 Staging via SSD: $remote_staging_dir" >&2
   echo "📦 Final destination: $remote_final_dir" >&2
   echo "" >&2
 
@@ -165,7 +177,7 @@ _ytdl_on_media_vm() {
       echo "$existing_file"
       # Clear trap and cleanup
       trap - INT TERM
-      /usr/bin/ssh media "rm -rf $_q_tmpdir 2>/dev/null || true"
+      /usr/bin/ssh media "rm -rf $_q_tmpdir $_q_staging_dir 2>/dev/null || true"
       return 0
     else
       echo "" >&2
@@ -177,19 +189,19 @@ _ytdl_on_media_vm() {
   fi
   echo "" >&2
 
-  # Run yt-dlp remotely, then move results to final dir
+  # Run yt-dlp remotely, then stage results to SSD NFS
   #
-  # Remote stdout is reserved for the final video file path.
+  # Remote stdout is reserved for video basenames (one per line).
   # All progress/info goes to stderr (yt-dlp >&2, echo >&2).
   local remote_script='
 set -euo pipefail
 
 tmpdir="$1"
 cookie="$2"
-finaldir="$3"
+staging_dir="$3"
 url="$4"
 
-mkdir -p "$finaldir"
+mkdir -p "$staging_dir"
 
 yt-dlp \
   --remote-components ejs:github \
@@ -215,13 +227,13 @@ if (( ${#files[@]} == 0 )); then
   exit 2
 fi
 
-echo "✅ Download complete. Moving to final dir..." >&2
-mv -v "${files[@]}" "$finaldir/" >&2
+echo "✅ Download complete. Staging to SSD..." >&2
+rsync --info=progress2 --remove-source-files "${files[@]}" "$staging_dir/" >&2
 
-# Output the video file path to stdout (for piping)
+# Output video basenames to stdout (Mac constructs final NFS-visible paths)
 for f in "${files[@]}"; do
   case "$f" in
-    *.mkv|*.mp4) echo "$finaldir/$(basename "$f")" ;;
+    *.mkv|*.mp4) echo "$(basename "$f")" ;;
   esac
 done
 
@@ -229,21 +241,14 @@ done
 rm -f "$cookie" || true
 rmdir "$tmpdir" 2>/dev/null || rm -rf "$tmpdir"
 
-echo "✅ Done." >&2
+echo "✅ Staged to SSD." >&2
 '
 
-  local final_path
-  if final_path="$(/usr/bin/ssh -o BatchMode=yes media "bash -s -- $(printf '%q' "$remote_tmpdir") $(printf '%q' "$remote_cookie") $(printf '%q' "$remote_final_dir") $(printf '%q' "$url")" <<<"$remote_script")"; then
-    # Clear trap and cleanup manually on success
-    trap - INT TERM
-    /usr/bin/ssh media "rm -rf $_q_tmpdir 2>/dev/null || true"
-    echo "" >&2
-    echo "✅ Successfully downloaded to: $remote_final_dir" >&2
-    # Output the final file path to stdout for piping
-    if [[ -n "$final_path" ]]; then
-      echo "$final_path"
-    fi
-    return 0
+  # Stage 1: Download on media VM, rsync to SSD NFS
+  local video_basenames
+  if video_basenames="$(/usr/bin/ssh -o BatchMode=yes media "bash -s -- $(printf '%q' "$remote_tmpdir") $(printf '%q' "$remote_cookie") $(printf '%q' "$remote_staging_dir") $(printf '%q' "$url")" <<<"$remote_script")"; then
+    # tmpdir cleaned by remote_script; staging dir still has files for stage 2
+    :
   else
     local exit_code=$?
     echo "❌ Remote download failed (exit code: $exit_code)" >&2
@@ -252,9 +257,59 @@ echo "✅ Done." >&2
     echo "  1. Update yt-dlp:     yt --update" >&2
     echo "  2. Refresh cookies:   re-export cookies to $LOCAL_YT_COOKIES" >&2
     echo "  3. Check URL:         open the URL in a browser to verify it's valid" >&2
-    # Clear trap and cleanup manually on failure
+    # Clear trap and cleanup both tmpdir and staging dir
     trap - INT TERM
-    /usr/bin/ssh media "rm -rf $_q_tmpdir 2>/dev/null || true"
+    /usr/bin/ssh media "rm -rf $_q_tmpdir $_q_staging_dir 2>/dev/null || true"
+    return 1
+  fi
+
+  # Stage 2: NAS-local copy from SSD (swift) to HDD (tank)
+  local nas_staging_dir="${NAS_STAGING_BASE}/${staging_subdir}"
+  local nas_final_dir="${NAS_FINAL_BASE}/${category}"
+
+  echo "" >&2
+  echo "📀 Transferring to HDD on NAS..." >&2
+
+  local nas_script='
+set -euo pipefail
+
+staging_dir="$1"
+final_dir="$2"
+
+if [ ! -d "$staging_dir" ]; then
+  echo "❌ Staging dir not found: $staging_dir" >&2
+  exit 1
+fi
+
+mkdir -p "$final_dir"
+rsync --info=progress2 --remove-source-files "$staging_dir/" "$final_dir/" >&2
+rmdir "$staging_dir" 2>/dev/null || true
+
+echo "✅ Done." >&2
+'
+
+  if /usr/bin/ssh -o BatchMode=yes "$NAS_SSH_HOST" "bash -s -- $(printf '%q' "$nas_staging_dir") $(printf '%q' "$nas_final_dir")" <<<"$nas_script"; then
+    # Clear trap — staging dir cleaned by nas_script, tmpdir cleaned by remote_script
+    trap - INT TERM
+    echo "" >&2
+    echo "✅ Successfully downloaded to: $remote_final_dir" >&2
+    # Output the final file paths to stdout for piping
+    if [[ -n "$video_basenames" ]]; then
+      local line
+      for line in "${(@f)video_basenames}"; do
+        echo "${remote_final_dir}/${line}"
+      done
+    fi
+    return 0
+  else
+    local nas_exit=$?
+    echo "❌ NAS transfer failed (exit code: $nas_exit)" >&2
+    echo "" >&2
+    echo "Files are safe on SSD staging. To manually complete the transfer:" >&2
+    echo "  ssh $NAS_SSH_HOST 'rsync -a --remove-source-files $(printf '%q' "$nas_staging_dir")/ $(printf '%q' "$nas_final_dir")/'" >&2
+    echo "  ssh $NAS_SSH_HOST 'rmdir $(printf '%q' "$nas_staging_dir")'" >&2
+    # Clear trap — don't delete staging dir since files are there for manual recovery
+    trap - INT TERM
     return 1
   fi
 }

@@ -294,7 +294,7 @@ if [ ! -d "$staging_dir" ]; then
 fi
 
 mkdir -p "$final_dir"
-rsync -a --omit-dir-times --info=progress2 --remove-source-files "$staging_dir/" "$final_dir/" >&2
+rsync -rl --info=progress2 --remove-source-files "$staging_dir/" "$final_dir/" >&2
 rmdir "$staging_dir" 2>/dev/null || true
 
 echo "✅ Done." >&2
@@ -318,7 +318,7 @@ echo "✅ Done." >&2
     echo "❌ NAS transfer failed (exit code: $nas_exit)" >&2
     echo "" >&2
     echo "Files are safe on SSD staging. To manually complete the transfer:" >&2
-    echo "  ssh $NAS_SSH_HOST 'rsync -a --remove-source-files $(printf '%q' "$nas_staging_dir")/ $(printf '%q' "$nas_final_dir")/'" >&2
+    echo "  ssh $NAS_SSH_HOST 'rsync -rl --remove-source-files $(printf '%q' "$nas_staging_dir")/ $(printf '%q' "$nas_final_dir")/'" >&2
     echo "  ssh $NAS_SSH_HOST 'rmdir $(printf '%q' "$nas_staging_dir")'" >&2
     # Clear trap — don't delete staging dir since files are there for manual recovery
     trap - INT TERM

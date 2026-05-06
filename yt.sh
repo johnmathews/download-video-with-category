@@ -222,19 +222,45 @@ yt-dlp \
   --embed-chapters \
   --embed-thumbnail \
   --convert-thumbnails jpg \
-  --sub-langs "en.*,nl,de,es" \
+  --sub-langs "en.*" \
+  --write-subs \
   --write-auto-subs \
   --embed-subs \
+  --convert-subs srt \
+  --sub-format "srv3/ttml/vtt/best" \
+  --sleep-subtitles 1 \
   -f bestvideo+bestaudio \
   --merge-output-format mkv \
   --restrict-filenames \
   -o "$tmpdir/%(uploader)s-%(title)s-[%(id)s].%(ext)s" \
-  "$url" >&2
+  "$url" >&2 || true
 
 shopt -s nullglob
-files=("$tmpdir"/*.{mkv,mp4,jpg,webp,srt,vtt,json,nfo} "$tmpdir"/*info.json)
-if (( ${#files[@]} == 0 )); then
-  echo "❌ No output files found in $tmpdir" >&2
+video_files=("$tmpdir"/*.{mkv,mp4})
+if (( ${#video_files[@]} == 0 )); then
+  echo "⚠️  Subtitle error may have aborted download. Retrying without subtitles..." >&2
+  yt-dlp \
+    --remote-components ejs:github \
+    --cookies "$cookie" \
+    --embed-metadata \
+    --embed-chapters \
+    --embed-thumbnail \
+    --convert-thumbnails jpg \
+    -f bestvideo+bestaudio \
+    --merge-output-format mkv \
+    --restrict-filenames \
+    -o "$tmpdir/%(uploader)s-%(title)s-[%(id)s].%(ext)s" \
+    "$url" >&2
+fi
+
+# Drop sidecar images and subs: both are embedded in the mkv, and loose
+# images confuse the Jellyfin poster scanner (folder-art bleed-through).
+rm -f "$tmpdir"/*.{jpg,jpeg,png,webp,srt,vtt}
+
+files=("$tmpdir"/*.{mkv,mp4,json,nfo} "$tmpdir"/*info.json)
+video_files=("$tmpdir"/*.{mkv,mp4})
+if (( ${#video_files[@]} == 0 )); then
+  echo "❌ No video files found in $tmpdir" >&2
   ls -la "$tmpdir" >&2 || true
   exit 2
 fi

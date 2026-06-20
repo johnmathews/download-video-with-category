@@ -487,7 +487,7 @@ _yt_playlist_on_media_vm() {
 
   local remote_cookie="$remote_cookie_dir/cookies.txt"
   echo "🍪 [$(_yt_elapsed)] Copying cookies to media VM..." >&2
-  $YT_SSH media "umask 077 && cat > $(printf '%q' "$remote_cookie")" < "$LOCAL_YT_COOKIES" || {
+  $YT_SSH -o BatchMode=yes media "umask 077 && cat > $(printf '%q' "$remote_cookie")" < "$LOCAL_YT_COOKIES" || {
     echo "❌ Failed to copy cookies to media VM" >&2
     $YT_SSH -o BatchMode=yes media "rm -rf $_q_cookie_dir 2>/dev/null || true"
     trap - INT TERM

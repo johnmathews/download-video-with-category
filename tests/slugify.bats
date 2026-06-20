@@ -4,7 +4,7 @@ setup() {
   cd "$BATS_TEST_DIRNAME/.."
 }
 
-slug() { run zsh -c "source ./yt.sh; _yt_slugify \"$1\""; }
+slug() { run zsh -c 'source ./yt.sh; _yt_slugify "$1"' _ "$1"; }
 
 @test "basic words to dashes" {
   slug "My Cooking Series"

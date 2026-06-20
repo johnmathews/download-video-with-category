@@ -51,6 +51,37 @@ yt -g "https://youtu.be/C4TVr2NtEg8" | epm
 
 The path is emitted whether the video was freshly downloaded or skipped as a duplicate.
 
+## Playlists
+
+Download an entire YouTube playlist into its own directory:
+
+```
+yt -p "https://www.youtube.com/playlist?list=PLxxxxxxxx"
+```
+
+After fetching the playlist title, `yt` derives a URL-safe slug (e.g. `my-playlist-name`) and
+prompts you to confirm or override it:
+
+```
+Use directory 'my-playlist-name'? [Y/n/edit]:
+```
+
+Press Enter (or `y`) to accept, `n` to abort, or type any string to use that as the slug instead.
+
+Each playlist becomes its own directory under `/mnt/tank/movies/youtube/<slug>/` on the NAS. Add
+that directory manually as a Jellyfin **movie** library so every video shows up as an individual
+movie entry.
+
+Videos are named with a three-digit index prefix (`001-title-[id].mkv`, `002-...`) so they sort in
+playlist order regardless of title.
+
+Re-runs are safe and cheap: `yt-dlp --download-archive` records every downloaded video ID in
+`/mnt/nfs/movies/youtube/<slug>/archive.txt`. Already-downloaded items are skipped instantly;
+only new or missing items are fetched. This makes it easy to resume an interrupted run or
+periodically sync a growing playlist.
+
+Each video is fully transferred to the NAS HDD before the next one begins.
+
 ## Updating yt-dlp
 
 If downloads fail (especially with format selection errors), yt-dlp on the media VM likely needs updating:

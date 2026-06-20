@@ -648,6 +648,7 @@ CATEGORIES:
 
 OPTIONS:
   --category CATEGORY    Specify category by name (alternative to shortcuts)
+  -p, --playlist URL     Download an entire playlist into its own library dir
   --update               Update yt-dlp on the media VM
   --help                 Show this help message
 
@@ -655,6 +656,9 @@ EXAMPLES:
   yt -g "https://youtu.be/C4TVr2NtEg8"
   yt -m "https://youtube.com/watch?v=dQw4w9WgXcQ"
   yt --category training "https://youtu.be/C4TVr2NtEg8"
+
+  Download a playlist as its own Jellyfin library:
+    yt -p "https://www.youtube.com/playlist?list=PLxxxxxxxx"
 
   Update yt-dlp on the media VM:
     yt --update
@@ -669,6 +673,7 @@ REQUIREMENTS:
 
 FILES:
   Final videos are saved to: /mnt/nfs/movies/youtube/{CATEGORY}/
+  Playlists are saved to:    /mnt/nfs/movies/youtube/{PLAYLIST-SLUG}/
 
 EOF
 }

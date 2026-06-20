@@ -352,6 +352,13 @@ echo "✅ Done." >&2
   fi
 }
 
+# Slugify a string for use as a directory name (lowercase ASCII, dashes).
+_yt_slugify() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'
+}
+
 # Help text function
 _yt_show_help() {
   cat >&2 <<'EOF'

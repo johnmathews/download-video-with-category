@@ -483,13 +483,13 @@ _yt_playlist_on_media_vm() {
     return 1
   }
   local _q_cookie_dir=$(printf '%q' "$remote_cookie_dir")
-  trap "$YT_SSH media \"rm -rf $_q_cookie_dir 2>/dev/null || true\" 2>/dev/null; trap - INT TERM; return 130" INT TERM
+  trap "$YT_SSH -o BatchMode=yes media \"rm -rf $_q_cookie_dir 2>/dev/null || true\" 2>/dev/null; trap - INT TERM; return 130" INT TERM
 
   local remote_cookie="$remote_cookie_dir/cookies.txt"
   echo "🍪 [$(_yt_elapsed)] Copying cookies to media VM..." >&2
   $YT_SSH media "umask 077 && cat > $(printf '%q' "$remote_cookie")" < "$LOCAL_YT_COOKIES" || {
     echo "❌ Failed to copy cookies to media VM" >&2
-    $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+    $YT_SSH -o BatchMode=yes media "rm -rf $_q_cookie_dir 2>/dev/null || true"
     trap - INT TERM
     return 1
   }
@@ -510,7 +510,7 @@ _yt_playlist_on_media_vm() {
     ""|y|Y) slug="$suggested" ;;
     n|N)
       echo "Aborted — nothing downloaded." >&2
-      $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+      $YT_SSH -o BatchMode=yes media "rm -rf $_q_cookie_dir 2>/dev/null || true"
       trap - INT TERM
       return 1
       ;;
@@ -518,7 +518,7 @@ _yt_playlist_on_media_vm() {
       slug="$(_yt_slugify "$answer")"
       if [[ -z "$slug" ]]; then
         echo "❌ '$answer' slugifies to an empty name" >&2
-        $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+        $YT_SSH -o BatchMode=yes media "rm -rf $_q_cookie_dir 2>/dev/null || true"
         trap - INT TERM
         return 1
       fi
@@ -531,7 +531,7 @@ _yt_playlist_on_media_vm() {
 
   $YT_SSH -o BatchMode=yes media "mkdir -p $(printf '%q' "$final_remote_dir")" || {
     echo "❌ Could not create $final_remote_dir on media VM" >&2
-    $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+    $YT_SSH -o BatchMode=yes media "rm -rf $_q_cookie_dir 2>/dev/null || true"
     trap - INT TERM
     return 1
   }
@@ -541,7 +541,7 @@ _yt_playlist_on_media_vm() {
   count="$($YT_SSH -o BatchMode=yes media "yt-dlp --remote-components ejs:github --flat-playlist --print '%(playlist_index)s' --cookies $(printf '%q' "$remote_cookie") $(printf '%q' "$url") 2>/dev/null | wc -l" | tr -d '[:space:]')"
   if [[ -z "$count" || "$count" == "0" ]]; then
     echo "❌ Playlist is empty or could not be read" >&2
-    $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+    $YT_SSH -o BatchMode=yes media "rm -rf $_q_cookie_dir 2>/dev/null || true"
     trap - INT TERM
     return 1
   fi
@@ -564,11 +564,16 @@ _yt_playlist_on_media_vm() {
     staging_subdir="$(basename "$item_tmpdir")"
     item_staging="${REMOTE_STAGING_BASE}/${staging_subdir}"
 
+    # Re-arm trap to also clean up this item's tmp and staging dirs on INT/TERM.
+    local _q_item_tmpdir=$(printf '%q' "$item_tmpdir")
+    local _q_item_staging=$(printf '%q' "$item_staging")
+    trap "$YT_SSH -o BatchMode=yes media \"rm -rf $_q_cookie_dir $_q_item_tmpdir $_q_item_staging 2>/dev/null || true\" 2>/dev/null; trap - INT TERM; return 130" INT TERM
+
     # Stage 1: download item + rsync to SSD staging.
     local basenames
     if ! basenames="$($YT_SSH -o BatchMode=yes media "bash -s -- $(printf '%q' "$item_tmpdir") $(printf '%q' "$remote_cookie") $(printf '%q' "$item_staging") $(printf '%q' "$url") $(printf '%q' "$n") $(printf '%q' "$archive_remote")" <<<"$_YT_PLAYLIST_ITEM_SCRIPT")"; then
       echo "❌ [$n/$count] download/staging failed" >&2
-      $YT_SSH media "rm -rf $(printf '%q' "$item_tmpdir") $(printf '%q' "$item_staging") 2>/dev/null || true"
+      $YT_SSH -o BatchMode=yes media "rm -rf $(printf '%q' "$item_tmpdir") $(printf '%q' "$item_staging") 2>/dev/null || true"
       (( failed++ ))
       continue
     fi
@@ -594,7 +599,7 @@ _yt_playlist_on_media_vm() {
   done
 
   # Cleanup cookie dir.
-  $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+  $YT_SSH -o BatchMode=yes media "rm -rf $_q_cookie_dir 2>/dev/null || true"
   trap - INT TERM
 
   echo "" >&2

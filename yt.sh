@@ -373,6 +373,7 @@ archive="$6"
 
 mkdir -p "$staging_dir"
 
+rc=0
 yt-dlp \
   --remote-components ejs:github \
   --cookies "$cookie" \
@@ -393,13 +394,14 @@ yt-dlp \
   --merge-output-format mkv \
   --restrict-filenames \
   -o "$tmpdir/%(playlist_index)03d-%(title)s-[%(id)s].%(ext)s" \
-  "$url" >&2 || true
+  "$url" >&2 || rc=$?
 
 shopt -s nullglob
 video_files=("$tmpdir"/*.{mkv,mp4})
 if (( ${#video_files[@]} == 0 )); then
   # Either already in the archive (skip) or a subtitle abort. Retry without
   # subs; a true skip still produces no file and is handled below.
+  rc=0
   yt-dlp \
     --remote-components ejs:github \
     --cookies "$cookie" \
@@ -413,7 +415,7 @@ if (( ${#video_files[@]} == 0 )); then
     --merge-output-format mkv \
     --restrict-filenames \
     -o "$tmpdir/%(playlist_index)03d-%(title)s-[%(id)s].%(ext)s" \
-    "$url" >&2 || true
+    "$url" >&2 || rc=$?
   video_files=("$tmpdir"/*.{mkv,mp4})
 fi
 
@@ -421,9 +423,14 @@ fi
 rm -f "$tmpdir"/*.{jpg,jpeg,png,webp,srt,vtt} 2>/dev/null || true
 
 if (( ${#video_files[@]} == 0 )); then
-  # Nothing downloaded -> already archived. Clean up, emit nothing (skip).
+  # Nothing downloaded. Discriminate: rc==0 means archived skip; rc!=0 is a
+  # genuine download failure that must not be silently counted as skipped.
   rmdir "$tmpdir" 2>/dev/null || rm -rf "$tmpdir"
-  exit 0
+  if (( rc == 0 )); then
+    exit 0   # archived skip — emit nothing
+  else
+    exit 3   # genuine download failure — emit nothing
+  fi
 fi
 
 files=("$tmpdir"/*.{mkv,mp4,json,nfo} "$tmpdir"/*info.json)

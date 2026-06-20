@@ -241,3 +241,15 @@ RSYNCEOF
 
   rm -rf "$idir" "$staging"
 }
+
+@test "item-script prefixes the embedded title with the playlist index" {
+  _load_item_script
+  # The embedded title must carry the playlist position so Jellyfin's
+  # metadata-based 'Name' sort matches playlist order, independent of the
+  # filename. yt-dlp writes meta_title (overriding the embedded title tag)
+  # via --parse-metadata. Both yt-dlp invocations (main + no-subs retry) must
+  # set it.
+  local n
+  n="$(printf '%s\n' "$ITEM_SCRIPT" | grep -c -- '--parse-metadata "%(playlist_index)03d - %(title)s:%(meta_title)s"')"
+  [ "$n" -eq 2 ]
+}

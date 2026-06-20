@@ -380,6 +380,7 @@ yt-dlp \
   --download-archive "$archive" \
   --playlist-items "$item" \
   --embed-metadata \
+  --parse-metadata "%(playlist_index)03d - %(title)s:%(meta_title)s" \
   --embed-chapters \
   --embed-thumbnail \
   --convert-thumbnails jpg \
@@ -408,6 +409,7 @@ if (( ${#video_files[@]} == 0 )); then
     --download-archive "$archive" \
     --playlist-items "$item" \
     --embed-metadata \
+    --parse-metadata "%(playlist_index)03d - %(title)s:%(meta_title)s" \
     --embed-chapters \
     --embed-thumbnail \
     --convert-thumbnails jpg \

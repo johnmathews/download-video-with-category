@@ -73,7 +73,17 @@ that directory manually as a Jellyfin **movie** library so every video shows up 
 movie entry.
 
 Videos are named with a three-digit index prefix (`001-title-[id].mkv`, `002-...`) so they sort in
-playlist order regardless of title.
+playlist order on disk. The same index is also embedded into the file's **title metadata** (e.g.
+`001 - Original Title`) via yt-dlp's `--parse-metadata`/`meta_title`, so Jellyfin keeps playlist
+order even when it sorts by the metadata "Name" rather than the filename. (Up to 999 items the
+zero-padded prefix sorts correctly; beyond that the padding would need widening.)
+
+> **Jellyfin note:** by default Jellyfin derives the display Name from the *filename* (which already
+> carries the `001-` prefix), so ordering works out of the box. The embedded-title prefix only
+> matters if the library has **"Prefer embedded titles over filenames"** enabled. The embedded
+> prefix exists only on files downloaded after this feature was added — older files have an
+> un-prefixed embedded title, so enabling that setting would require re-downloading (or re-tagging)
+> them to keep order.
 
 Re-runs are safe and cheap: `yt-dlp --download-archive` records every downloaded video ID in
 `/mnt/nfs/movies/youtube/<slug>/archive.txt`. Already-downloaded items are skipped instantly;

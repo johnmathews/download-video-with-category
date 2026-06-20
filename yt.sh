@@ -688,12 +688,28 @@ yt() {
 
   # Parse flags using zparseopts
   local -A opts
-  zparseopts -D -E -A opts -- g y c m h t e -category: -help -update
+  zparseopts -D -E -A opts -- g y c m h t e p -category: -help -update -playlist
 
   # Handle --update before anything else
   if (( ${+opts[--update]} )); then
     echo "🔄 Updating yt-dlp on media VM..." >&2
     /usr/bin/ssh -o BatchMode=yes -t media 'sudo apt update && sudo apt install --only-upgrade yt-dlp' >&2
+    return $?
+  fi
+
+  # Playlist mode: download a whole playlist into its own library dir.
+  if (( ${+opts[-p]} || ${+opts[--playlist]} )); then
+    if (( ${+opts[-g]} || ${+opts[-y]} || ${+opts[-c]} || ${+opts[-m]} || ${+opts[-h]} || ${+opts[-t]} || ${+opts[-e]} )) || [[ -n "${opts[--category]}" ]]; then
+      echo "❌ Error: -p/--playlist cannot be combined with a category flag" >&2
+      return 1
+    fi
+    local playlist_url="$1"
+    if [[ -z "$playlist_url" ]]; then
+      echo "❌ Error: playlist URL is required" >&2
+      echo "Usage: yt -p <playlist-url>" >&2
+      return 1
+    fi
+    noglob _yt_playlist_on_media_vm "$playlist_url"
     return $?
   fi
 

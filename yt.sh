@@ -359,6 +359,249 @@ echo "✅ Staged to SSD." >&2
   fi
 }
 
+# Per-item playlist download script (stage 1): yt-dlp one playlist item to
+# $tmpdir, then rsync to SSD staging. stdout = video basenames (skip => empty).
+_YT_PLAYLIST_ITEM_SCRIPT='
+set -euo pipefail
+
+tmpdir="$1"
+cookie="$2"
+staging_dir="$3"
+url="$4"
+item="$5"
+archive="$6"
+
+mkdir -p "$staging_dir"
+
+yt-dlp \
+  --remote-components ejs:github \
+  --cookies "$cookie" \
+  --download-archive "$archive" \
+  --playlist-items "$item" \
+  --embed-metadata \
+  --embed-chapters \
+  --embed-thumbnail \
+  --convert-thumbnails jpg \
+  --sub-langs "en.*" \
+  --write-subs \
+  --write-auto-subs \
+  --embed-subs \
+  --convert-subs srt \
+  --sub-format "srv3/ttml/vtt/best" \
+  --sleep-subtitles 1 \
+  -f bestvideo+bestaudio \
+  --merge-output-format mkv \
+  --restrict-filenames \
+  -o "$tmpdir/%(playlist_index)03d-%(title)s-[%(id)s].%(ext)s" \
+  "$url" >&2 || true
+
+shopt -s nullglob
+video_files=("$tmpdir"/*.{mkv,mp4})
+if (( ${#video_files[@]} == 0 )); then
+  # Either already in the archive (skip) or a subtitle abort. Retry without
+  # subs; a true skip still produces no file and is handled below.
+  yt-dlp \
+    --remote-components ejs:github \
+    --cookies "$cookie" \
+    --download-archive "$archive" \
+    --playlist-items "$item" \
+    --embed-metadata \
+    --embed-chapters \
+    --embed-thumbnail \
+    --convert-thumbnails jpg \
+    -f bestvideo+bestaudio \
+    --merge-output-format mkv \
+    --restrict-filenames \
+    -o "$tmpdir/%(playlist_index)03d-%(title)s-[%(id)s].%(ext)s" \
+    "$url" >&2 || true
+  video_files=("$tmpdir"/*.{mkv,mp4})
+fi
+
+# Drop sidecars (embedded in mkv; loose images confuse Jellyfin poster scan).
+rm -f "$tmpdir"/*.{jpg,jpeg,png,webp,srt,vtt} 2>/dev/null || true
+
+if (( ${#video_files[@]} == 0 )); then
+  # Nothing downloaded -> already archived. Clean up, emit nothing (skip).
+  rmdir "$tmpdir" 2>/dev/null || rm -rf "$tmpdir"
+  exit 0
+fi
+
+files=("$tmpdir"/*.{mkv,mp4,json,nfo} "$tmpdir"/*info.json)
+rsync --info=progress2 --remove-source-files "${files[@]}" "$staging_dir/" >&2
+for f in "${files[@]}"; do
+  case "$f" in
+    *.mkv|*.mp4) echo "$(basename "$f")" ;;
+  esac
+done
+rmdir "$tmpdir" 2>/dev/null || rm -rf "$tmpdir"
+'
+
+# Download an entire playlist into its own Jellyfin movie library directory.
+_yt_playlist_on_media_vm() {
+  setopt local_options pipefail
+
+  local _yt_start=$SECONDS
+  _yt_elapsed() {
+    local secs=$(( SECONDS - _yt_start ))
+    if (( secs >= 60 )); then
+      printf '%dm %ds' $((secs / 60)) $((secs % 60))
+    else
+      printf '%ds' $secs
+    fi
+  }
+
+  local url="$1"
+  if [[ -z "$url" ]]; then
+    echo "Usage: ${funcstack[1]} <playlist-url>" >&2
+    return 1
+  fi
+
+  # Cookie validation (mirrors single-video path).
+  if [[ ! -f "$LOCAL_YT_COOKIES" ]]; then
+    echo "❌ Cookies file not found:" >&2
+    echo "   $LOCAL_YT_COOKIES" >&2
+    return 1
+  fi
+  if [[ ! -s "$LOCAL_YT_COOKIES" ]]; then
+    echo "❌ Cookies file is empty: $LOCAL_YT_COOKIES" >&2
+    return 1
+  fi
+  local cookie_age_days=$(( ($(date +%s) - $(stat -f %m "$LOCAL_YT_COOKIES" 2>/dev/null || stat -c %Y "$LOCAL_YT_COOKIES")) / 86400 ))
+  if [[ $cookie_age_days -gt 7 ]]; then
+    echo "⚠️  Warning: Cookies file is $cookie_age_days days old (may be stale)" >&2
+  fi
+
+  if ! $YT_SSH -o BatchMode=yes media 'command -v yt-dlp >/dev/null 2>&1' < /dev/null; then
+    echo "❌ yt-dlp not found on media VM" >&2
+    return 1
+  fi
+
+  # Upload cookie once into a dedicated remote tmp dir.
+  local remote_cookie_dir
+  remote_cookie_dir="$($YT_SSH -o BatchMode=yes media 'mktemp -d /tmp/yt.pl.XXXXXX' < /dev/null)" || {
+    echo "❌ Failed to create remote temp dir" >&2
+    return 1
+  }
+  local _q_cookie_dir=$(printf '%q' "$remote_cookie_dir")
+  trap "$YT_SSH media \"rm -rf $_q_cookie_dir 2>/dev/null || true\" 2>/dev/null; trap - INT TERM; return 130" INT TERM
+
+  local remote_cookie="$remote_cookie_dir/cookies.txt"
+  echo "🍪 [$(_yt_elapsed)] Copying cookies to media VM..." >&2
+  $YT_SSH media "umask 077 && cat > $(printf '%q' "$remote_cookie")" < "$LOCAL_YT_COOKIES" || {
+    echo "❌ Failed to copy cookies to media VM" >&2
+    $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+    trap - INT TERM
+    return 1
+  }
+
+  # Resolve the playlist title -> slug, confirm/override.
+  echo "🔍 [$(_yt_elapsed)] Fetching playlist title..." >&2
+  local playlist_title
+  playlist_title="$($YT_SSH -o BatchMode=yes media "yt-dlp --remote-components ejs:github --flat-playlist --playlist-items 1 --print '%(playlist_title)s' --cookies $(printf '%q' "$remote_cookie") $(printf '%q' "$url") 2>/dev/null" < /dev/null || echo "")"
+
+  local suggested
+  suggested="$(_yt_slugify "$playlist_title")"
+  [[ -z "$suggested" ]] && suggested="playlist"
+
+  printf "Use directory '%s'? [Y/n/edit]: " "$suggested" >&2
+  local answer slug
+  read -r answer
+  case "$answer" in
+    ""|y|Y) slug="$suggested" ;;
+    n|N)
+      echo "Aborted — nothing downloaded." >&2
+      $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+      trap - INT TERM
+      return 1
+      ;;
+    *)
+      slug="$(_yt_slugify "$answer")"
+      if [[ -z "$slug" ]]; then
+        echo "❌ '$answer' slugifies to an empty name" >&2
+        $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+        trap - INT TERM
+        return 1
+      fi
+      ;;
+  esac
+
+  local final_remote_dir="${REMOTE_FINAL_BASE}/${slug}"
+  local nas_final_dir="${NAS_FINAL_BASE}/${slug}"
+  local archive_remote="${final_remote_dir}/archive.txt"
+
+  $YT_SSH -o BatchMode=yes media "mkdir -p $(printf '%q' "$final_remote_dir")" || {
+    echo "❌ Could not create $final_remote_dir on media VM" >&2
+    $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+    trap - INT TERM
+    return 1
+  }
+
+  # Count playlist items.
+  local count
+  count="$($YT_SSH -o BatchMode=yes media "yt-dlp --remote-components ejs:github --flat-playlist --print '%(playlist_index)s' --cookies $(printf '%q' "$remote_cookie") $(printf '%q' "$url") 2>/dev/null | wc -l" | tr -d '[:space:]')"
+  if [[ -z "$count" || "$count" == "0" ]]; then
+    echo "❌ Playlist is empty or could not be read" >&2
+    $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+    trap - INT TERM
+    return 1
+  fi
+
+  echo "" >&2
+  echo "📚 Playlist: $playlist_title" >&2
+  echo "📁 Library dir: $final_remote_dir  ($count items)" >&2
+  echo "" >&2
+
+  local downloaded=0 skipped=0 failed=0 n
+  for (( n = 1; n <= count; n++ )); do
+    echo "▶️  [$(_yt_elapsed)] [$n/$count] processing item $n..." >&2
+
+    local item_tmpdir staging_subdir item_staging
+    item_tmpdir="$($YT_SSH -o BatchMode=yes media 'mktemp -d /tmp/yt.XXXXXX')" || {
+      echo "❌ [$n/$count] mktemp failed" >&2
+      (( failed++ ))
+      continue
+    }
+    staging_subdir="$(basename "$item_tmpdir")"
+    item_staging="${REMOTE_STAGING_BASE}/${staging_subdir}"
+
+    # Stage 1: download item + rsync to SSD staging.
+    local basenames
+    if ! basenames="$($YT_SSH -o BatchMode=yes media "bash -s -- $(printf '%q' "$item_tmpdir") $(printf '%q' "$remote_cookie") $(printf '%q' "$item_staging") $(printf '%q' "$url") $(printf '%q' "$n") $(printf '%q' "$archive_remote")" <<<"$_YT_PLAYLIST_ITEM_SCRIPT")"; then
+      echo "❌ [$n/$count] download/staging failed" >&2
+      $YT_SSH media "rm -rf $(printf '%q' "$item_tmpdir") $(printf '%q' "$item_staging") 2>/dev/null || true"
+      (( failed++ ))
+      continue
+    fi
+
+    if [[ -z "$basenames" ]]; then
+      echo "⏭️  [$n/$count] already downloaded — skipped" >&2
+      (( skipped++ ))
+      continue
+    fi
+
+    # Stage 2: NAS-local SSD -> HDD into the playlist library dir.
+    local nas_staging="${NAS_STAGING_BASE}/${staging_subdir}"
+    if $YT_SSH -o BatchMode=yes "$NAS_SSH_HOST" "bash -s -- $(printf '%q' "$nas_staging") $(printf '%q' "$nas_final_dir")" <<<"$_YT_NAS_SCRIPT"; then
+      (( downloaded++ ))
+      local line
+      for line in "${(@f)basenames}"; do
+        [[ -n "$line" ]] && echo "${final_remote_dir}/${line}"
+      done
+    else
+      echo "❌ [$n/$count] NAS transfer failed — files remain on SSD: $nas_staging" >&2
+      (( failed++ ))
+    fi
+  done
+
+  # Cleanup cookie dir.
+  $YT_SSH media "rm -rf $_q_cookie_dir 2>/dev/null || true"
+  trap - INT TERM
+
+  echo "" >&2
+  echo "✅ [$(_yt_elapsed)] Playlist '$slug': downloaded $downloaded, skipped $skipped, failed $failed" >&2
+  (( failed == 0 ))
+}
+
 # Slugify a string for use as a directory name (lowercase ASCII, dashes).
 _yt_slugify() {
   printf '%s' "$1" \

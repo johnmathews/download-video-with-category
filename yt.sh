@@ -16,6 +16,29 @@ NAS_SSH_HOST="nas"
 # Local cookies file on your Mac (Netscape cookies.txt format)
 LOCAL_YT_COOKIES="$HOME/.config/yt-dlp/cookies/cookies.txt"
 
+# SSH binary indirection so tests can stub remote calls. Defaults to the real ssh.
+: ${YT_SSH:=/usr/bin/ssh}
+
+# Stage-2 transfer script (NAS-local SSD swift -> HDD tank), shared by the
+# single-video and playlist paths.
+_YT_NAS_SCRIPT='
+set -euo pipefail
+
+staging_dir="$1"
+final_dir="$2"
+
+if [ ! -d "$staging_dir" ]; then
+  echo "❌ Staging dir not found: $staging_dir" >&2
+  exit 1
+fi
+
+mkdir -p "$final_dir"
+rsync -rl --info=progress2 --remove-source-files "$staging_dir/" "$final_dir/" >&2
+rmdir "$staging_dir" 2>/dev/null || true
+
+echo "✅ Done." >&2
+'
+
 _ytdl_on_media_vm() {
   setopt local_options pipefail
 
@@ -308,23 +331,7 @@ echo "✅ Staged to SSD." >&2
   echo "" >&2
   echo "📀 [$(_yt_elapsed)] Transferring to HDD on NAS..." >&2
 
-  local nas_script='
-set -euo pipefail
-
-staging_dir="$1"
-final_dir="$2"
-
-if [ ! -d "$staging_dir" ]; then
-  echo "❌ Staging dir not found: $staging_dir" >&2
-  exit 1
-fi
-
-mkdir -p "$final_dir"
-rsync -rl --info=progress2 --remove-source-files "$staging_dir/" "$final_dir/" >&2
-rmdir "$staging_dir" 2>/dev/null || true
-
-echo "✅ Done." >&2
-'
+  local nas_script="$_YT_NAS_SCRIPT"
 
   if /usr/bin/ssh -o BatchMode=yes "$NAS_SSH_HOST" "bash -s -- $(printf '%q' "$nas_staging_dir") $(printf '%q' "$nas_final_dir")" <<<"$nas_script"; then
     # Clear trap — staging dir cleaned by nas_script, tmpdir cleaned by remote_script

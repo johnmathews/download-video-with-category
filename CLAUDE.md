@@ -40,7 +40,7 @@ The SSH binary is configurable via `$YT_SSH` (default `/usr/bin/ssh`). Tests stu
 ## Shell Conventions
 
 - **zsh-only** — uses `zparseopts`, `setopt local_options pipefail`, zsh array syntax `${(@f)...}`, `${(ie)...}`
-- SSH commands use `/usr/bin/ssh` (absolute path) with `-o BatchMode=yes`
+- SSH commands go through `$YT_SSH` (defaults to `/usr/bin/ssh`) with `-o BatchMode=yes`
 - All variables embedded in SSH commands are escaped with `printf '%q'`
 - Signal traps clean up remote temp dirs on INT/TERM
 - Cookie files get restrictive permissions via `umask 077`

@@ -638,12 +638,13 @@ for sd in "$base"/*/; do
   for d in "$sd"/Season\ */; do
     d="${d%/}"; any=1
     n="${d##*/Season }"; n=$((10#$n))
-    t=""; [ -f "$d/season.nfo" ] && t=$(sed -n "s:.*<title>\(.*\)</title>.*:\1:p" "$d/season.nfo" | head -1)
+    t=""; [ -f "$d/season.nfo" ] && t=$(sed -n "s:.*<title>\(.*\)</title>.*:\1:p" "$d/season.nfo" | head -1 | sed "s/&amp;/\&/g; s/&lt;/</g; s/&gt;/>/g; s/&quot;/\"/g")
     c=0; for f in "$d"/*.mkv "$d"/*.mp4 "$d"/*.webm; do c=$((c+1)); done
     printf "%s\t%d\t%s\t%d\n" "$show" "$n" "$t" "$c"
   done
-  [ $any = 0 ] && printf "%s\t\t\t0\n" "$show"
+  if [ $any = 0 ]; then printf "%s\t\t\t0\n" "$show"; fi
 done
+exit 0
 '
 
 # Fitness mode, stage 0 (media VM): resolve "<Show>/<Season>" to a season dir
@@ -671,7 +672,7 @@ else
   for d in "$show_dir"/Season\ */; do
     d="${d%/}"
     t=""
-    [ -f "$d/season.nfo" ] && t=$(sed -n "s:.*<title>\(.*\)</title>.*:\1:p" "$d/season.nfo" | head -1)
+    [ -f "$d/season.nfo" ] && t=$(sed -n "s:.*<title>\(.*\)</title>.*:\1:p" "$d/season.nfo" | head -1 | sed "s/&amp;/\&/g; s/&lt;/</g; s/&gt;/>/g; s/&quot;/\"/g")
     if [ "${t,,}" = "${spec,,}" ] || [ "${d##*/}" = "$spec" ]; then season_dir="$d"; break; fi
   done
   num=""
@@ -686,11 +687,11 @@ if [ -z "$season_dir" ]; then
   season_dir=$(printf "%s/Season %02d" "$show_dir" "$num")
   if [ ! -d "$show_dir" ]; then
     mkdir -p "$show_dir"
-    printf "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n<tvshow>\n  <title>%s</title>\n  <lockdata>false</lockdata>\n</tvshow>\n" "$show" > "$show_dir/tvshow.nfo"
+    printf "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n<tvshow>\n  <title>%s</title>\n  <lockdata>false</lockdata>\n</tvshow>\n" "$(printf "%s" "$show" | sed "s/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g")" > "$show_dir/tvshow.nfo"
     echo "🆕 Created show $show_dir" >&2
   fi
   mkdir -p "$season_dir"
-  printf "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n<season>\n  <title>%s</title>\n  <seasonnumber>%d</seasonnumber>\n  <lockdata>false</lockdata>\n</season>\n" "$create_name" "$num" > "$season_dir/season.nfo"
+  printf "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n<season>\n  <title>%s</title>\n  <seasonnumber>%d</seasonnumber>\n  <lockdata>false</lockdata>\n</season>\n" "$(printf "%s" "$create_name" | sed "s/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g")" "$num" > "$season_dir/season.nfo"
   echo "🆕 Created $season_dir (\"$create_name\")" >&2
 fi
 
@@ -916,7 +917,8 @@ _yt_fitness_on_media_vm() {
       $YT_SSH -o BatchMode=yes media "rm -rf $_q_tmpdir 2>/dev/null || true"; trap - INT TERM; return 1
     fi
     local listing
-    listing="$($YT_SSH -o BatchMode=yes media "bash -s -- $(printf '%q' "$fitness_base")" <<<"$_YT_FITNESS_LIST_SCRIPT")" || listing=""
+    listing="$($YT_SSH -o BatchMode=yes media "bash -s -- $(printf '%q' "$fitness_base")" <<<"$_YT_FITNESS_LIST_SCRIPT" 2>/dev/null)" || true
+    [[ -z "$listing" ]] && echo "⚠️  Could not list existing shows under $fitness_base (is the media VM's NFS mount up?) — only 'new show' is offered" >&2
     target="$(_yt_fitness_pick_target "$listing")" || {
       echo "Aborted — nothing downloaded." >&2
       $YT_SSH -o BatchMode=yes media "rm -rf $_q_tmpdir 2>/dev/null || true"; trap - INT TERM; return 1

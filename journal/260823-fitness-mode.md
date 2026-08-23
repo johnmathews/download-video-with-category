@@ -23,3 +23,10 @@ manual rename to `<Show> SnnEnn - …-[id].mkv`, a hand-written `.nfo` and a thu
 `${x%%|*}` is a glob alternation; `printf %q` escapes the space in `Season 03` (tests grep for
 `fitness/Kettlebell/Season`). An earlier draft had an unescaped `"<Show>/<Season>"` inside an
 `echo "…"` — zsh parses `<Show>` as a redirect — caught by the patch anchor failing.
+
+**First live run (same day).** The show list came back empty: the listing script's last
+statement was `[ $any = 0 ] && printf …`, which leaves bash's exit status at 1 whenever the last
+show has seasons, so `ssh` returned 1 and `|| listing=""` discarded the output. Now `exit 0`
+explicitly, and yt.sh keeps whatever was listed regardless of the exit code (warns if empty).
+Also `season.nfo` titles are XML-escaped (`Mobility &amp; Physio`) — unescaped when listing and
+matching, escaped when writing new nfo.

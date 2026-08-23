@@ -38,3 +38,10 @@ season without a marker: asked once), `--season-order`, and `Show/N:Name:feed|co
 The one-off renumber of the existing loose seasons lives in proxmox-setup (`reorder-season`).
 Second exit-status trap of the day: the picker ended with `[[ -n … ]] && printf`, returning 1
 when there was nothing to print, which read as "aborted".
+
+**First successful real run.** `yt -f` → Mobility & Physio S01E983 (feed: newest first), nfo title /
+plot / aired written, Jellyfin indexed it with the nfo title, overview and thumbnail on the next scan.
+Two things found: the media VM's apt/PPA yt-dlp (2026.03.17) 403'd mid-download — replaced by the
+official standalone binary (proxmox-setup media_vm role, `yt --update`); leftover `.srv3` subtitle
+sidecars are now removed (subs are embedded). Thumbnail may stay `.webp` when the first attempt
+succeeds — Jellyfin reads webp fine.

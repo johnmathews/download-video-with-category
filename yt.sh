@@ -764,7 +764,8 @@ if (( ${#video_files[@]} == 0 )); then
   dl
   video_files=("$tmpdir"/*.{mkv,mp4})
 fi
-rm -f "$tmpdir"/*.{srt,vtt} 2>/dev/null || true
+# Subtitles are embedded in the mkv; drop every loose subtitle sidecar (srt/vtt/srv3/ttml/...).
+rm -f "$tmpdir"/*.{srt,vtt,srv3,ttml,ass,json3} 2>/dev/null || true
 if (( ${#video_files[@]} == 0 )); then
   echo "❌ No video files found in $tmpdir" >&2; ls -la "$tmpdir" >&2 || true; exit 2
 fi

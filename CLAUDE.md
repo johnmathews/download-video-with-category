@@ -34,6 +34,8 @@ Functions defined:
 - `_yt_slugify()` — converts a playlist title to a lowercase dash-separated directory name
 - `_yt_show_help()` — help text
 
+`yt --update` refreshes the official standalone yt-dlp binary in `/usr/local/bin` on the media VM over `$YT_SSH` (not apt; the PPA lags).
+
 Shell-level constants hold heredoc scripts that are piped to `bash -s` over SSH:
 - `_YT_NAS_SCRIPT` — stage-2 NAS-local SSD→HDD rsync; shared by all paths
 - `_YT_PLAYLIST_ITEM_SCRIPT` — stage-1 per-item yt-dlp download + SSD staging for the playlist path

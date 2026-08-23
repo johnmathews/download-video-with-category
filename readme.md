@@ -40,6 +40,13 @@ yt --update
 yt --help
 ```
 
+## Keeping yt-dlp current
+
+`yt --update` downloads the **official standalone `yt-dlp_linux` binary** into `/usr/local/bin` on
+the media VM (it shadows the apt/PPA package, which lags for months — symptoms: HTTP 403 part-way
+through a download, "no impersonate target is available"). The same binary is installed by the
+proxmox-setup `media_vm` role (`make media t=ytdlp`).
+
 ## Piping
 
 Only the final file path is emitted to stdout (all progress and status output goes to stderr). This means `yt` works in

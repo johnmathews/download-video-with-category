@@ -1132,7 +1132,7 @@ OPTIONS:
                          with no order set is asked about once.
   --season-order "Show/Season" [feed|course]
                          Show or set a season's order (writes Season NN/.order).
-  --update               Update yt-dlp on the media VM
+  --update               Update yt-dlp on the media VM (official standalone binary)
   --help                 Show this help message
 
 EXAMPLES:
@@ -1189,10 +1189,12 @@ yt() {
   local -A opts
   zparseopts -D -E -A opts -- g y c m h t e p f -category: -help -update -playlist -fitness -season-order
 
-  # Handle --update before anything else
+  # Handle --update before anything else: refresh the official standalone binary in
+  # /usr/local/bin (installed by the proxmox-setup media_vm role, tag ytdlp). The apt/PPA
+  # package lags for months and then YouTube answers 403 mid-download.
   if (( ${+opts[--update]} )); then
-    echo "🔄 Updating yt-dlp on media VM..." >&2
-    /usr/bin/ssh -o BatchMode=yes -t media 'sudo apt update && sudo apt install --only-upgrade yt-dlp' >&2
+    echo "🔄 Updating yt-dlp on media VM (official standalone binary -> /usr/local/bin)..." >&2
+    $YT_SSH -o BatchMode=yes -t media 'set -e; tmp=$(mktemp); curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o "$tmp" && sudo install -m 0755 -o root -g root "$tmp" /usr/local/bin/yt-dlp && rm -f "$tmp" && echo "yt-dlp now $(yt-dlp --version)"' >&2
     return $?
   fi
 

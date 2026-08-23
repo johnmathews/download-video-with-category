@@ -28,12 +28,19 @@ case "\$cmd" in
   *"bash -s"*)
     # discriminate the three media-VM bash -s scripts by their content
     case "\$stdin" in
-      *"_list_"*|*'printf "%s\t%d\t%s\t%d\n"'*)
-        printf 'Bodyweight\t1\tBodyweight\t22\nKettlebell\t1\tCompilations\t17\nKettlebell\t2\tTurkish Get-Up\t26\nKettlebell\t3\tTutorials\t9\n'; exit 0 ;;
+      *"for sd in"*)
+        printf 'Bodyweight\t1\tBodyweight\t22\tfeed\nKettlebell\t1\tCompilations\t17\tcourse\nKettlebell\t2\tTurkish Get-Up\t26\tcourse\nKettlebell\t3\tTutorials\t9\tfeed\n'; exit 0 ;;
       *"next episode number"*)
         # resolve: show dir, season dir, next episode, digits — echo what we were asked for
         show="\$(printf '%s' "\$cmd" | sed -n 's/.*bash -s -- [^ ]* \([^ ]*\) .*/\1/p' | tr -d "'")"
-        printf '/mnt/nfs/movies/youtube/fitness/Kettlebell\n/mnt/nfs/movies/youtube/fitness/Kettlebell/Season 03\n10\n2\n'; exit 0 ;;
+        # STUB_MODE=noorder: pretend the season has no .order marker yet (6th line = 1)
+        if [ "\$STUB_MODE" = noorder ] && ! printf '%s' "\$cmd" | grep -q "feed'\\|course'"; then
+          printf '/mnt/nfs/movies/youtube/fitness/Kettlebell\n/mnt/nfs/movies/youtube/fitness/Kettlebell/Season 03\n10\n2\ncourse\n1\n'; exit 0
+        fi
+        if printf '%s' "\$cmd" | grep -q "feed'"; then
+          printf '/mnt/nfs/movies/youtube/fitness/Kettlebell\n/mnt/nfs/movies/youtube/fitness/Kettlebell/Season 03\n990\n3\nfeed\n0\n'; exit 0
+        fi
+        printf '/mnt/nfs/movies/youtube/fitness/Kettlebell\n/mnt/nfs/movies/youtube/fitness/Kettlebell/Season 03\n10\n2\ncourse\n0\n'; exit 0 ;;
       *)
         [ "\$STUB_MODE" = dlfail ] && exit 2
         echo "Kettlebell S03E10 - Mark_Wildman-Snatch-[abcDEF12345].mkv"; exit 0 ;;
@@ -64,7 +71,7 @@ run_f() {
   run_f "2\\ntutorials\\ny\\n" "" "https://youtu.be/abcDEF12345"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Seasons of Kettlebell:"* ]]
-  [[ "$output" == *"3) Tutorials (9 episodes)"* ]]
+  [[ "$output" == *"3) Tutorials (9 episodes, feed)"* ]]
   [[ "$output" == *"Kettlebell/Season 03/Kettlebell S03E10"* ]]
 }
 
@@ -108,4 +115,28 @@ run_f() {
   run_f "y\n" "Kettlebell" "https://youtu.be/abcDEF12345"
   [ "$status" -ne 0 ]
   [[ "$output" == *"<Show>/<Season>"* ]]
+}
+
+@test "a season without an .order marker is asked about once and the answer is passed to resolve" {
+  run_f "f\\ny\\n" "Kettlebell/3" "https://youtu.be/abcDEF12345" noorder
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"has no order set yet"* ]]
+  [[ "$output" == *"(feed)  →  S03E990"* ]]
+  grep -q "Tutorials\|3 feed\|'3' feed\|3 'feed'\|feed" "$LOG"
+}
+
+@test "Show/N:Name:feed creates a feed season and numbers from the top" {
+  run_f "y\\n" "Kettlebell/4:Swings:feed" "https://youtu.be/abcDEF12345"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"S03E990"* ]]          # stub answers the same dir; what matters is the order arg reached resolve
+  grep -q "4:Swings" "$LOG"
+  grep -q "feed" "$LOG"
+}
+
+@test "yt --season-order sets and reports a season order" {
+  run env zsh -c "source ./yt.sh; YT_SSH='$STUB'; yt --season-order 'Kettlebell/3' feed"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"order=feed"* ]]
+  run env zsh -c "source ./yt.sh; YT_SSH='$STUB'; yt --season-order 'Kettlebell/3' sideways"
+  [ "$status" -ne 0 ]
 }

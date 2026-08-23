@@ -81,6 +81,20 @@ What it does for you:
 - if `JELLYFIN_URL` and `JELLYFIN_API_KEY` are set, asks Jellyfin to scan now; otherwise the
   scheduled scan picks it up.
 
+**Feed vs course seasons.** Every season has an *order*, kept in `Season NN/.order`:
+
+- `course` — oldest first, episodes numbered 1, 2, 3… (playlist-style tutorials; the default);
+- `feed` — newest first: episodes are numbered **down from 999** (first video E999, next E998 …)
+  so the latest addition always sorts to the top without renaming anything already there.
+  Jellyfin has no "descending" switch, hence the numbering trick; the visible numbers are large.
+
+`yt -f` shows the order next to each season, asks `Order — [f]eed / [c]ourse` when you create a
+season (default feed) or the first time you add to a season that has no marker yet, and
+`yt --season-order "Kettlebell/Tutorials" feed` sets or shows it explicitly (also accepted inline:
+`yt -f "Kettlebell/4:Swings:course" <url>`). Switching an existing ascending season to `feed`
+only affects *new* episodes; renumbering the existing ones is the one-off `migrate.py
+reorder-season` in proxmox-setup.
+
 Show/season artwork is **not** made here — after creating a season or show, run `make_posters.py`
 in the `proxmox-setup` repo (see its `documentation/jellyfin_health_fitness_library.md`, which is
 the canonical description of the library's layout and rules).

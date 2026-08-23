@@ -30,3 +30,11 @@ show has seasons, so `ssh` returned 1 and `|| listing=""` discarded the output. 
 explicitly, and yt.sh keeps whatever was listed regardless of the exit code (warns if empty).
 Also `season.nfo` titles are XML-escaped (`Mobility &amp; Physio`) — unescaped when listing and
 matching, escaped when writing new nfo.
+
+**Newest-first.** John wants feed-style seasons sorted newest first; Jellyfin has no descending
+option for episodes. Implemented "feed" seasons numbered down from 999 (course seasons stay
+1..N), an `.order` marker per season dir, prompts for it (new season: default feed; existing
+season without a marker: asked once), `--season-order`, and `Show/N:Name:feed|course` inline.
+The one-off renumber of the existing loose seasons lives in proxmox-setup (`reorder-season`).
+Second exit-status trap of the day: the picker ended with `[[ -n … ]] && printf`, returning 1
+when there was nothing to print, which read as "aborted".

@@ -18,7 +18,7 @@ USAGE:
   yt -SHORTCUT URL
   yt --category CATEGORY URL
   yt --update
-  yt --help
+  yt --help  (or: yt help)
 
 DESCRIPTION:
   Downloads YouTube (and other) videos directly on the media VM and saves them to the correct
@@ -52,7 +52,7 @@ OPTIONS:
   --season-order "Show/Season" [feed|course]
                          Show or set a season's order (writes Season NN/.order).
   --update               Update yt-dlp on the media VM (official standalone binary)
-  --help                 Show this help message
+  --help                 Show this help message (also: yt help)
 
 EXAMPLES:
   yt -g "https://youtu.be/C4TVr2NtEg8"
@@ -133,7 +133,7 @@ def _usage_error(*lines: str) -> None:
 
 
 def run(argv: list[str]) -> int:
-    if not argv or argv[0] == "--help":
+    if not argv or argv[0] in ("--help", "help"):
         sys.stderr.write(help_text())
         return 0
     args = build_parser().parse_intermixed_args(argv)

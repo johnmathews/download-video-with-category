@@ -22,9 +22,12 @@ class TestHelp:
         assert out == ""
         assert "CATEGORIES:" in err
 
-    def test_help_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
-        assert _run(["--help"]) == 0
-        assert "USAGE:" in capsys.readouterr().err
+    @pytest.mark.parametrize("argv", [["--help"], ["help"]])
+    def test_help_flag_and_word(self, argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+        assert _run(argv) == 0
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert "USAGE:" in err
 
     def test_help_lists_every_category(self) -> None:
         text = help_text()

@@ -51,7 +51,7 @@ yt -g "https://youtu.be/C4TVr2NtEg8"
 yt -m "https://youtube.com/watch?v=dQw4w9WgXcQ"
 yt --category training "https://youtu.be/C4TVr2NtEg8"
 yt --update
-yt --help
+yt --help          # or: yt help
 ```
 
 ## Piping

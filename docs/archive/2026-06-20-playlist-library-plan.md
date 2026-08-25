@@ -1,3 +1,5 @@
+**Status:** superseded by [architecture.md](../architecture.md) (2026-08-25). Historical plan/spec for the zsh implementation, which was ported to Python; kept for the design rationale.
+
 # Playlist-as-Jellyfin-Library Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

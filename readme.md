@@ -1,6 +1,6 @@
 # yt - Download videos to media VM
 
-A shell function that downloads YouTube (and other) videos directly on the media VM via SSH, saving them to categorized
+A CLI that downloads YouTube (and other) videos directly on the media VM via SSH, saving them to categorized
 directories on the NFS-mounted movies dataset.
 
 ## How it works
@@ -13,7 +13,21 @@ directories on the NFS-mounted movies dataset.
 6. Cleans up temp and staging dirs
 
 Duplicate detection compares video quality via ffprobe and skips downloads when the existing file is equal or better
-quality.
+quality. See [docs/architecture.md](docs/architecture.md) for the two-stage transfer and the code layout.
+
+## Setup
+
+```sh
+uv tool install -e .      # puts `yt` on PATH (editable, so a git pull is picked up)
+yt --help
+```
+
+Requirements:
+
+- SSH access to `media` and `nas` hosts (configured in `~/.ssh/config`)
+- YouTube cookies exported to `~/.config/yt-dlp/cookies/cookies.txt` (Netscape cookies.txt format, use a browser
+  extension); override the location with `LOCAL_YT_COOKIES`
+- yt-dlp and ffprobe on the media VM (`yt --update` installs/refreshes yt-dlp)
 
 ## Categories
 
@@ -40,13 +54,6 @@ yt --update
 yt --help
 ```
 
-## Keeping yt-dlp current
-
-`yt --update` downloads the **official standalone `yt-dlp_linux` binary** into `/usr/local/bin` on
-the media VM (it shadows the apt/PPA package, which lags for months — symptoms: HTTP 403 part-way
-through a download, "no impersonate target is available"). The same binary is installed by the
-proxmox-setup `media_vm` role (`make media t=ytdlp`).
-
 ## Piping
 
 Only the final file path is emitted to stdout (all progress and status output goes to stderr). This means `yt` works in
@@ -57,6 +64,14 @@ yt -g "https://youtu.be/C4TVr2NtEg8" | epm
 ```
 
 The path is emitted whether the video was freshly downloaded or skipped as a duplicate.
+
+## Keeping yt-dlp current
+
+`yt --update` downloads the **official standalone `yt-dlp_linux` binary** into `/usr/local/bin` on
+the media VM (it shadows the apt/PPA package, which lags for months — symptoms: HTTP 403 part-way
+through a download, "no impersonate target is available", format selection errors). A TTY is allocated
+for the sudo prompt. The same binary is installed by the proxmox-setup `media_vm` role (`make media t=ytdlp`).
+`yt` suggests this when it can't fetch video info or when a download fails.
 
 ## Health & Fitness (Jellyfin Shows library)
 
@@ -80,7 +95,7 @@ What it does for you:
 - picks the **next episode number** in that season and names the file
   `<Show> SnnEnn - <uploader>-<title>-[<id>].mkv` (Jellyfin reads season/episode from `SnnEnn`);
 - writes the episode **`.nfo`** (title, cleaned description with `Channel · date` header, aired
-  date, sort title, YouTube id) and the **`-thumb.jpg`** via `jellyfin_nfo.py`, which is shipped
+  date, sort title, YouTube id) and the **`-thumb.jpg`** via `yt/jellyfin_nfo.py`, which is shipped
   to the media VM over stdin (python3, stdlib only);
 - creates the show (`tvshow.nfo`) and/or season (`season.nfo` with the name) when you choose
   "new";
@@ -147,53 +162,18 @@ periodically sync a growing playlist.
 
 Each video is fully transferred to the NAS HDD before the next one begins.
 
-## Updating yt-dlp
-
-If downloads fail (especially with format selection errors), yt-dlp on the media VM likely needs updating:
-
-```
-yt --update
-```
-
-This runs `sudo apt update && sudo apt install --only-upgrade yt-dlp` on the media VM via SSH. A TTY is allocated for the
-sudo prompt.
-
-The script will also suggest this when it can't fetch video info or when a download fails.
-
-## Setup
-
-Source the script in your shell profile:
+## Development
 
 ```sh
-source "$HOME/projects/photo-video/download-video/yt.sh"
+uv sync
+uv run python -m pytest --cov=yt   # 132 tests, no SSH needed (ssh is faked in tests/conftest.py)
+uv run ruff check . && uv run ruff format --check .
+uv run pyright
 ```
 
-## Two-stage SSD-staged transfer
+The same checks run in GitHub Actions on every push. `YT_SSH` swaps the ssh binary (for wrappers or
+manual stubbing), `YT_NFO_HELPER` points at an alternative nfo helper, and
+`YT_FITNESS_ANSWERS_FROM_STDIN=1` lets the interactive prompts read answers from a pipe.
 
-The transfer uses two stages to maximize throughput:
-
-1. **Media VM → SSD NFS** (`/tmp` → `/mnt/nfs/downloads/yt-staging/`): rsync over NFS at ~552 MB/s (~4s for 2 GB)
-2. **NAS-local SSD → HDD** (`swift` → `tank`): rsync on the NAS itself at ~1.6 GB/s (~1.3s for 2 GB)
-
-The Mac orchestrates both stages via separate SSH calls — one to `media`, one to `nas`. Total transfer time for a 2 GB
-file is ~5 seconds, down from ~40 seconds with the previous single-stage rsync from `/tmp` directly to HDD NFS.
-
-Each download gets a unique staging subdir (e.g. `yt-staging/yt.a1b2c3`) derived from the `/tmp` tempdir name, so
-concurrent downloads don't collide.
-
-If the NAS transfer fails, files remain safe on the SSD staging dir and the error message includes a manual recovery
-command. There is no silent fallback to a slow path.
-
-**Why not simpler approaches:**
-- **rsync directly to HDD NFS** (the old approach) — only ~50 MB/s, ~40s for 2 GB
-- **Download directly to HDD NFS** — slower mux due to NFS latency and HDD random I/O
-- **`mv` between NFS mounts from media VM** — sends data over the network twice (NAS→VM→NAS)
-
-## Requirements
-
-- SSH access to `media` host (configured in `~/.ssh/config`)
-- SSH access to `nas` host (configured in `~/.ssh/config`) — for the NAS-local SSD→HDD transfer
-- YouTube cookies exported to `~/.config/yt-dlp/cookies/cookies.txt` (Netscape cookies.txt format, use a browser
-  extension)
-- yt-dlp installed on the media VM
-- ffprobe on the media VM (for duplicate quality comparison)
+`yt` used to be a zsh function sourced from `~/.zshrc`; that file is gone, so a leftover
+`source .../download-video/yt.sh` line is now a harmless no-op and can be deleted.

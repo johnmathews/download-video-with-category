@@ -1,0 +1,51 @@
+[project]
+name = "yt"
+version = "1.0.0"
+description = "Download YouTube videos on the media VM and file them into the NFS movies library (categories, playlists, Jellyfin fitness shows)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+yt = "yt.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["yt"]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.6", "pyright>=1.1.380"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["yt"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "DTZ", "BLE", "PL", "RUF"]
+ignore = ["PLR0913", "PLR0912", "PLR0915", "PLR2004", "PLR0911", "RUF001", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR", "S", "E501", "PLC0415"]
+# Bash that runs on the media VM / NAS, kept verbatim from the zsh original.
+"yt/remote_scripts.py" = ["E501"]
+# Stdlib-only helper piped to the media VM; its regexes deliberately contain invisible unicode to strip.
+"yt/jellyfin_nfo.py" = ["E501", "PLE2502", "PLE2515", "PLR0917"]
+
+[tool.pyright]
+include = ["yt", "tests"]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"

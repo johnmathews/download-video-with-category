@@ -1,0 +1,73 @@
+# Architecture
+
+> Purpose: how `yt` moves a video from YouTube to the NAS, and where each piece of the code lives.
+
+## 1. Data flow
+
+```
+Mac (local)                   Media VM (SSH)                  NAS (SSH)
+───────────                   ──────────────                  ─────────
+yt parses flags/URL           yt-dlp downloads video
+  → validates cookies         /tmp/yt.XXXXXX (local disk)
+  → uploads cookies via SSH          │
+  → fetches video info               ▼ rsync (~552 MB/s)
+  → checks for duplicates    /mnt/nfs/downloads/yt-staging/   ← SSD (swift pool)
+  → SSH to media: download              │
+  → SSH to nas: local copy              ▼ rsync (~1.6 GB/s)
+  → emits final path                               /mnt/tank/movies/youtube/{category}/
+                                                      ← HDD (tank pool)
+```
+
+**Key rule:** all status/progress goes to stderr; only final file paths go to stdout. This makes `yt`
+pipeline-friendly (`yt -g URL | epm`).
+
+## 2. Two-stage SSD-staged transfer
+
+1. **Media VM → SSD NFS**: the remote download script rsyncs from `/tmp` to
+   `/mnt/nfs/downloads/yt-staging/<subdir>` (~552 MB/s, ~4 s for 2 GB).
+2. **NAS-local SSD → HDD**: `yt` SSHes to `nas` and runs `NAS_SCRIPT`, an rsync from
+   `/mnt/swift/downloads/yt-staging/<subdir>` to `/mnt/tank/movies/youtube/...` (~1.6 GB/s, ~1.3 s for 2 GB).
+
+Each download gets a unique staging subdir derived from the `/tmp` tempdir name (e.g. `yt.a1b2c3`) so
+concurrent downloads don't collide. If stage 2 fails, the files stay on SSD staging and the error message
+includes the manual recovery command — there is no silent fallback to a slow path.
+
+Why not simpler approaches: rsync directly to HDD NFS was ~50 MB/s (~40 s for 2 GB); downloading directly to
+HDD NFS makes the mux slow; `mv` between NFS mounts from the media VM sends the data over the network twice.
+
+## 3. Package layout (`yt/`)
+
+| Module | Role |
+|---|---|
+| `cli.py` | Flag parsing (`-g -y -c -m -h -t -e`, `--category`, `-p`, `-f`, `--season-order`, `--update`, `--help`) and dispatch. `-h` is the *humanity* shortcut, not help. |
+| `config.py` | Hosts, NFS/NAS paths, category table, and the environment overrides (`LOCAL_YT_COOKIES`, `YT_SSH`, `YT_NFO_HELPER`, `JELLYFIN_URL`/`JELLYFIN_API_KEY`, `YT_FITNESS_ANSWERS_FROM_STDIN`). |
+| `ssh.py` | The one place that spawns `ssh`. `ssh()` runs a command with `BatchMode=yes`; `run_script()` pipes a bash script to `bash -s -- args…` with every argument `shlex.quote`d; `remove_remote()` is best-effort cleanup. Tests replace `_execute`. |
+| `remote_scripts.py` | The bash that runs *on* the media VM / NAS, as string constants: `NAS_SCRIPT`, `SINGLE_ITEM_SCRIPT`, `PLAYLIST_ITEM_SCRIPT`, `FITNESS_LIST_SCRIPT`, `FITNESS_RESOLVE_SCRIPT`, `FITNESS_ITEM_SCRIPT`, `UPDATE_COMMAND`. Kept as shell because yt-dlp, rsync and the mounts live there; they take positional arguments only. |
+| `cookies.py` | Cookie-file preflight (missing / empty / older than 7 days) and upload under `umask 077`. |
+| `session.py` | `Session`: `mktemp` on the media VM, the derived staging dirs, cookie upload, `nas_transfer()`, and cleanup. Used as a context manager: a `KeyboardInterrupt` inside the block removes the remote tmp and staging dirs and exits 130 (the zsh `trap`). |
+| `single.py` | `yt -g URL`: info fetch, duplicate check by `[id]` with ffprobe quality comparison, download, two-stage transfer. |
+| `playlist.py` | `yt -p URL`: slug confirmation, per-item loop with `--download-archive`, downloaded/skipped/failed accounting. |
+| `fitness.py` | `yt -f`: interactive show/season picker, resolve on the media VM (season dir, next episode number, feed/course order), download + `SnnEnn` rename, nfo via `jellyfin_nfo.py`, optional Jellyfin scan; `--season-order`. |
+| `jellyfin_nfo.py` | Stdlib-only script shipped over stdin to the media VM's `python3 -`; writes the episode `.nfo` and renames the thumbnail. Must not import from `yt`. Its `clean_overview()` is a copy of the one in proxmox-setup's `migrate.py` — keep them in step. |
+| `ui.py` | `info()` (stderr), `emit()` (stdout), `prompt()`, `Elapsed`, `format_size()`, and the `Failure` exception the CLI turns into an exit code. |
+
+## 4. Remote-script contracts
+
+Every remote script gets its inputs as `bash -s -- arg1 arg2 …` positional parameters. The Python side never
+interpolates a value into script text, so quoting is a solved problem in exactly one function (`ssh.q`).
+
+- Stage-1 download scripts print **video basenames** on stdout, one per line, and nothing else; the Mac
+  builds the NFS-visible final paths from them.
+- `PLAYLIST_ITEM_SCRIPT` exits 0 with no output for an archived skip and **3** for a genuine yt-dlp failure, so
+  the loop can count them separately.
+- `FITNESS_RESOLVE_SCRIPT` prints six lines: show dir, season dir, next episode, digit width, order,
+  order-was-missing. Exit 4 = season not found and no `N:Name` to create it.
+- `FITNESS_LIST_SCRIPT` prints one tab-separated line per season: show, number, title, episode count, order.
+
+## 5. Testing
+
+`tests/conftest.py` provides `fake_ssh`, a Python fake for `ssh._execute` that records every call and answers
+by rules keyed on the command text (and, for the fitness scripts, on the script content sent over stdin) —
+the same discrimination the old bats stub did. `PLAYLIST_ITEM_SCRIPT` is additionally run for real under bash
+with a fake `yt-dlp` and `rsync` on `PATH`. `jellyfin_nfo.py` is tested both imported and as a script piped to
+`python3 -`.

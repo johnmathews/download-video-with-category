@@ -39,10 +39,15 @@ _BOILER_RE = re.compile(
     r"get the bonus|thanks?( you)? for (watching|reading|listening)|my favou?rite gear|gear i use|what (workout )?gear|"
     r"what'?s your camera|podcast credit|produced|directed|director of|edited by|filmed by|shot by|source:|"
     r"full .{0,30}protocol|home gym|timestamps?|chapters?|have any questions|questions\?|leave a comment|comment below|"
-    r"let me know|like and|hit the|turn on notifications|#|\W*$)", re.I)
+    r"let me know|like and|hit the|turn on notifications|#|\W*$)",
+    re.I,
+)
 _LABEL_RE = re.compile(r"^.{1,60}[:：]\s*$")
-_PROMO_RE = re.compile(r"(discount|coupon|promo|\bcode\b|% ?off|offer|seminar|click|link below|sign ?up|training today|teacher training|"
-                       r"for purchase|limited time|free trial|download the app|available now)", re.I)
+_PROMO_RE = re.compile(
+    r"(discount|coupon|promo|\bcode\b|% ?off|offer|seminar|click|link below|sign ?up|training today|teacher training|"
+    r"for purchase|limited time|free trial|download the app|available now)",
+    re.I,
+)
 _SENTENCE_RE = re.compile(r"[.!?…]")
 _TIMESTAMP_RE = re.compile(r"^\(?\d{1,2}:\d{2}")
 _BULLET_RE = re.compile(r"^[\s•►▶\-—–*·>]+")
@@ -56,7 +61,12 @@ def _prose_lines(paragraph: str) -> list[str]:
     for ln in lines:
         core = _BULLET_RE.sub("", ln)
         if _URL_RE.search(core):
-            core = re.sub(r"(\(?(https?://|www\.)\S+\)?|\b\S+\.(com|net|org|io|gg|tv|ly|me|app|online|uk|us)\S*)", "", core, flags=re.I)
+            core = re.sub(
+                r"(\(?(https?://|www\.)\S+\)?|\b\S+\.(com|net|org|io|gg|tv|ly|me|app|online|uk|us)\S*)",
+                "",
+                core,
+                flags=re.I,
+            )
             core = re.sub(r"[\s➡️→>:\-–—|]+$", "", core).strip()
             if len(core) < 40 or not _SENTENCE_RE.search(core):
                 continue
@@ -113,11 +123,25 @@ def _xml(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def episode_nfo(title: str, show: str, season: int, episode: int, plot: str | None, aired: str | None,
-                year: int | None, youtube_id: str | None, uploader: str | None) -> str:
-    lines = ['<?xml version="1.0" encoding="utf-8" standalone="yes"?>', "<episodedetails>",
-             f"  <title>{_xml(title)}</title>", f"  <showtitle>{_xml(show)}</showtitle>",
-             f"  <season>{season}</season>", f"  <episode>{episode}</episode>"]
+def episode_nfo(
+    title: str,
+    show: str,
+    season: int,
+    episode: int,
+    plot: str | None,
+    aired: str | None,
+    year: int | None,
+    youtube_id: str | None,
+    uploader: str | None,
+) -> str:
+    lines = [
+        '<?xml version="1.0" encoding="utf-8" standalone="yes"?>',
+        "<episodedetails>",
+        f"  <title>{_xml(title)}</title>",
+        f"  <showtitle>{_xml(show)}</showtitle>",
+        f"  <season>{season}</season>",
+        f"  <episode>{episode}</episode>",
+    ]
     if plot:
         lines.append(f"  <plot>{_xml(plot)}</plot>")
     if aired:
@@ -145,7 +169,11 @@ def write_sidecars(staging: Path, show: str, season: int, episode: int) -> list[
         title = info.get("title") or video.stem.split(" - ", 1)[-1]
         uploader = info.get("uploader") or info.get("channel")
         upload_date = info.get("upload_date")  # YYYYMMDD
-        aired = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}" if upload_date and len(upload_date) >= 8 else None
+        aired = (
+            f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+            if upload_date and len(upload_date) >= 8
+            else None
+        )
         year = int(upload_date[:4]) if upload_date and upload_date[:4].isdigit() else None
         plot = clean_overview(info.get("description"), uploader, upload_date)
         nfo = Path(str(stem) + ".nfo")

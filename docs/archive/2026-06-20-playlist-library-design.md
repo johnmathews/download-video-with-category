@@ -1,3 +1,5 @@
+**Status:** superseded by [architecture.md](../architecture.md) (2026-08-25). Historical plan/spec for the zsh implementation, which was ported to Python; kept for the design rationale.
+
 # Playlist-as-Jellyfin-Library — Design
 
 **Date:** 2026-06-20

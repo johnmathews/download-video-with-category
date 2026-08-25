@@ -71,7 +71,7 @@ The path is emitted whether the video was freshly downloaded or skipped as a dup
 the media VM (it shadows the apt/PPA package, which lags for months — symptoms: HTTP 403 part-way
 through a download, "no impersonate target is available", format selection errors). A TTY is allocated
 for the sudo prompt. The same binary is installed by the proxmox-setup `media_vm` role (`make media t=ytdlp`).
-`yt` suggests this when it can't fetch video info or when a download fails.
+In single-video mode `yt` suggests this when it can't fetch video info or when a download fails.
 
 ## Health & Fitness (Jellyfin Shows library)
 
@@ -88,7 +88,8 @@ yt -f "Running/1:Form" "https://youtu.be/…"                 # create a new sho
 
 With just a URL it shows the video's title, then lists the existing shows (numbered, plus
 `n) new show`), then that show's seasons with episode counts (plus `n) new season`), then asks
-`Add '<title>' there? [Y/n]`. Answer with a number or a name; Enter accepts the default.
+`Add '<title>' there? [Y/n]`. Answer the show and season questions with a number or a name (there is no default); Enter accepts the
+default at the order and `[Y/n]` prompts.
 
 What it does for you:
 
@@ -136,7 +137,7 @@ prompts you to confirm or override it:
 Use directory 'my-playlist-name'? [Y/n/edit]:
 ```
 
-Press Enter (or `y`) to accept, `n` to abort, or type any string to use that as the slug instead.
+Press Enter (or `y`) to accept, `n` to abort, or type a name to use instead (it is slugified the same way; an answer that slugifies to nothing aborts).
 
 Each playlist becomes its own directory under `/mnt/tank/movies/youtube/<slug>/` on the NAS. Add
 that directory manually as a Jellyfin **movie** library so every video shows up as an individual
@@ -166,7 +167,7 @@ Each video is fully transferred to the NAS HDD before the next one begins.
 
 ```sh
 uv sync
-uv run python -m pytest --cov=yt   # 132 tests, no SSH needed (ssh is faked in tests/conftest.py)
+uv run python -m pytest --cov=yt   # 133 tests, no SSH needed (ssh is faked in tests/conftest.py)
 uv run ruff check . && uv run ruff format --check .
 uv run pyright
 ```
@@ -174,6 +175,7 @@ uv run pyright
 The same checks run in GitHub Actions on every push. `YT_SSH` swaps the ssh binary (for wrappers or
 manual stubbing), `YT_NFO_HELPER` points at an alternative nfo helper, and
 `YT_FITNESS_ANSWERS_FROM_STDIN=1` lets the interactive prompts read answers from a pipe.
+The original zsh-era playlist design and plan are kept in [docs/archive/](docs/archive/).
 
 `yt` used to be a zsh function sourced from `~/.zshrc`; that file is gone, so a leftover
 `source .../download-video/yt.sh` line is now a harmless no-op and can be deleted.

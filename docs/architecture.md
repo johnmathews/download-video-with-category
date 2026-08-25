@@ -39,17 +39,17 @@ HDD NFS makes the mux slow; `mv` between NFS mounts from the media VM sends the 
 
 | Module | Role |
 |---|---|
-| `cli.py` | Flag parsing (`-g -y -c -m -h -t -e`, `--category`, `-p`, `-f`, `--season-order`, `--update`, `--help`) and dispatch. `-h` is the *humanity* shortcut, not help. |
+| `cli.py` | Flag parsing (`-g -y -c -m -h -t -e`, `--category`, `-p`, `-f`, `--season-order`, `--update`, `--help`; a bare `help` word also shows help) and dispatch. `-h` is the *humanity* shortcut, not help. |
 | `config.py` | Hosts, NFS/NAS paths, category table, and the environment overrides (`LOCAL_YT_COOKIES`, `YT_SSH`, `YT_NFO_HELPER`, `JELLYFIN_URL`/`JELLYFIN_API_KEY`, `YT_FITNESS_ANSWERS_FROM_STDIN`). |
 | `ssh.py` | The one place that spawns `ssh`. `ssh()` runs a command with `BatchMode=yes`; `run_script()` pipes a bash script to `bash -s -- args…` with every argument `shlex.quote`d; `remove_remote()` is best-effort cleanup. Tests replace `_execute`. |
 | `remote_scripts.py` | The bash that runs *on* the media VM / NAS, as string constants: `NAS_SCRIPT`, `SINGLE_ITEM_SCRIPT`, `PLAYLIST_ITEM_SCRIPT`, `FITNESS_LIST_SCRIPT`, `FITNESS_RESOLVE_SCRIPT`, `FITNESS_ITEM_SCRIPT`, `UPDATE_COMMAND`. Kept as shell because yt-dlp, rsync and the mounts live there; they take positional arguments only. |
-| `cookies.py` | Cookie-file preflight (missing / empty / older than 7 days) and upload under `umask 077`. |
+| `cookies.py` | Cookie-file preflight (missing / empty / older than 7 days), the `yt-dlp` presence check on the media VM, and upload under `umask 077`. |
 | `session.py` | `Session`: `mktemp` on the media VM, the derived staging dirs, cookie upload, `nas_transfer()`, and cleanup. Used as a context manager: a `KeyboardInterrupt` inside the block removes the remote tmp and staging dirs and exits 130 (the zsh `trap`). |
 | `single.py` | `yt -g URL`: info fetch, duplicate check by `[id]` with ffprobe quality comparison, download, two-stage transfer. |
 | `playlist.py` | `yt -p URL`: slug confirmation, per-item loop with `--download-archive`, downloaded/skipped/failed accounting. |
 | `fitness.py` | `yt -f`: interactive show/season picker, resolve on the media VM (season dir, next episode number, feed/course order), download + `SnnEnn` rename, nfo via `jellyfin_nfo.py`, optional Jellyfin scan; `--season-order`. |
 | `jellyfin_nfo.py` | Stdlib-only script shipped over stdin to the media VM's `python3 -`; writes the episode `.nfo` and renames the thumbnail. Must not import from `yt`. Its `clean_overview()` is a copy of the one in proxmox-setup's `migrate.py` — keep them in step. |
-| `ui.py` | `info()` (stderr), `emit()` (stdout), `prompt()`, `Elapsed`, `format_size()`, and the `Failure` exception the CLI turns into an exit code. |
+| `ui.py` | `info()` (stderr), `emit()` (stdout), `prompt()`, `interactive()` (tty, or `YT_FITNESS_ANSWERS_FROM_STDIN`), `Elapsed`, `format_size()`, and the `Failure` exception the CLI turns into an exit code. |
 
 ## 4. Remote-script contracts
 
@@ -61,8 +61,10 @@ interpolates a value into script text, so quoting is a solved problem in exactly
 - `PLAYLIST_ITEM_SCRIPT` exits 0 with no output for an archived skip and **3** for a genuine yt-dlp failure, so
   the loop can count them separately.
 - `FITNESS_RESOLVE_SCRIPT` prints six lines: show dir, season dir, next episode, digit width, order,
-  order-was-missing. Exit 4 = season not found and no `N:Name` to create it.
-- `FITNESS_LIST_SCRIPT` prints one tab-separated line per season: show, number, title, episode count, order.
+  order-was-missing. Exit 4 = season not found and no `N:Name` to create it; 5 = order value not `feed`/`course`;
+  6 = feed season has no episode numbers left. The Python side reports every non-zero exit as "Could not resolve".
+- `FITNESS_LIST_SCRIPT` prints one tab-separated line per season: show, number, title, episode count, order —
+  plus `<show>\t\t\t0\t` for a show that has no seasons yet, so the picker can still list it.
 
 ## 5. Testing
 

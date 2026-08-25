@@ -24,7 +24,8 @@ DESCRIPTION:
   Downloads YouTube (and other) videos directly on the media VM and saves them to the correct
   subdirectory in the movies dataset.
 
-  The script copies a youtube cookie from ~/.config/yt-dlp/cookies/cookies.txt onto the media VM.
+  The script copies a youtube cookie from ~/.config/yt-dlp/cookies/cookies.txt (or $LOCAL_YT_COOKIES)
+  onto the media VM.
   Use a browser plugin to copy the cookie from a browser to the local config directory.
 
   The script handles:
@@ -78,7 +79,7 @@ EXAMPLES:
     yt -g "https://youtu.be/C4TVr2NtEg8" | epm
 
 REQUIREMENTS:
-  - YouTube cookies must be exported to: ~/.config/yt-dlp/cookies/cookies.txt
+  - YouTube cookies must be exported to: ~/.config/yt-dlp/cookies/cookies.txt (override: LOCAL_YT_COOKIES)
   - SSH access to 'media' host must be configured
   - yt-dlp must be installed on the media VM
 

@@ -13,7 +13,9 @@ directories on the NFS-mounted movies dataset.
 6. Cleans up temp and staging dirs
 
 Duplicate detection differs by mode: single-video mode compares quality via ffprobe and skips when the existing file
-is equal or better (and refuses to guess when either quality is unknown); playlist mode uses yt-dlp's
+is equal or better (and refuses to guess when either quality is unknown). On an upgrade the old file is deleted once
+the new one has transferred — yt-dlp names files from the current uploader and title, so an upgrade usually lands
+under a different name and would otherwise sit alongside the old one. playlist mode uses yt-dlp's
 `--download-archive`, and fitness mode matches the YouTube id anywhere in the show. Only single-video mode compares
 quality, so a playlist re-run will not upgrade a 480p item to 1080p.
 

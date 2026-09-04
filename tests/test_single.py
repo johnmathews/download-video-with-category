@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from yt.single import download_single, warn_if_unsupported_url
+from yt.ssh import q
 from yt.ui import Failure
 
 URL = "https://youtu.be/abcDEF12345"
@@ -175,3 +176,65 @@ def test_unsupported_url_warns(capsys: pytest.CaptureFixture[str]) -> None:
     warn_if_unsupported_url("https://www.youtube.com/watch?v=x")
     warn_if_unsupported_url("https://vimeo.com/123")
     assert capsys.readouterr().err == ""
+
+
+class TestSupersededFileRemoval:
+    """`yt` printed "Old file will be replaced" and then never replaced anything.
+
+    yt-dlp builds the filename from the *current* uploader and title, and YouTube titles
+    change — so a quality upgrade usually lands under a new name, rsync writes it
+    alongside the old one, and the category dir ends up with two files carrying the same
+    [id]. The next run's find_existing() may then match either.
+    """
+
+    OLD = f"{FINAL}/Old_Uploader-Old_Title-[abcDEF12345].mkv"
+    NEW = f"{FINAL}/Uploader-Some_Video-[abcDEF12345].mkv"
+
+    def _upgrade(self, media: Any, existing: str) -> None:
+        media.on("find ", stdout=f"{existing}\n")
+        media.on("ffprobe", stdout="720\n")  # existing 720p vs new 1080p -> upgrade
+
+    def test_removes_the_old_file_once_the_new_one_has_landed(
+        self, media: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._upgrade(media, self.OLD)
+        assert download_single("music", URL) == 0
+        assert f"rm -f {q(self.OLD)}" in " ".join(media.commands())  # q(): the path has [brackets]
+        assert "Removed superseded file" in capsys.readouterr().err
+
+    def test_does_not_delete_when_rsync_already_overwrote_it(
+        self, media: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Same filename means the transfer replaced it in place; deleting would remove
+        the file we just downloaded."""
+        self._upgrade(media, self.NEW)
+        assert download_single("music", URL) == 0
+        assert "rm -f" not in " ".join(media.commands())
+        assert "Removed superseded file" not in capsys.readouterr().err
+
+    def test_does_not_delete_when_the_nas_transfer_failed(self, media: Any) -> None:
+        """The new file never reached the library, so the old one is all there is."""
+        self._upgrade(media, self.OLD)
+        media.rules.insert(0, lambda c: (1, "") if c.host == "nas" else None)
+        with pytest.raises(Failure):
+            download_single("music", URL)
+        assert "rm -f" not in " ".join(media.commands()), "deleted the old file after a failed transfer"
+
+    def test_does_not_delete_when_there_was_no_existing_file(self, media: Any) -> None:
+        media.on("find ", stdout="")
+        assert download_single("music", URL) == 0
+        assert "rm -f" not in " ".join(media.commands())
+
+    def test_does_not_delete_when_the_download_was_skipped(self, media: Any) -> None:
+        media.on("find ", stdout=f"{self.OLD}\n")
+        media.on("ffprobe", stdout="1080\n")  # equal quality -> skip, keep the old file
+        assert download_single("music", URL) == 0
+        assert "rm -f" not in " ".join(media.commands())
+
+    def test_a_failed_removal_warns_rather_than_aborting(self, media: Any, capsys: pytest.CaptureFixture[str]) -> None:
+        self._upgrade(media, self.OLD)
+        media.rules.insert(0, lambda c: (1, "") if c.command.startswith("rm -f ") else None)
+        assert download_single("music", URL) == 0, "the download itself succeeded"
+        err = capsys.readouterr().err
+        assert "Could not remove" in err
+        assert self.OLD in err

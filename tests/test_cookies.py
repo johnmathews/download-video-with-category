@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -59,3 +60,24 @@ def test_upload_streams_file_with_umask(fake_ssh, cookies: Path) -> None:
     call = fake_ssh.calls[0]
     assert call.command == "umask 077 && cat > /tmp/yt.x/cookies.txt"
     assert call.stdin == "fake-cookie\n"
+
+
+def test_unreachable_host_is_not_reported_as_missing_ytdlp(fake_ssh: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    """ssh exits 255 when it cannot connect. Reporting that as "yt-dlp not found" sends
+    the user to `yt --update`, which fails the same way. This is the only remote
+    preflight, so it is the first thing seen when the VM is down."""
+    fake_ssh.on("command -v yt-dlp", rc=255)
+    with pytest.raises(Failure):
+        check_ytdlp_installed()
+    err = capsys.readouterr().err
+    assert "Could not reach" in err
+    assert "yt --update" not in err, "do not suggest a command that fails the same way"
+
+
+def test_missing_ytdlp_still_says_so(fake_ssh: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    fake_ssh.on("command -v yt-dlp", rc=1)  # `command -v` exits 1 when not found
+    with pytest.raises(Failure):
+        check_ytdlp_installed()
+    err = capsys.readouterr().err
+    assert "yt-dlp not found" in err
+    assert "yt --update" in err

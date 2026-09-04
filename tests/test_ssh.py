@@ -3,6 +3,7 @@ from __future__ import annotations
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,7 +16,10 @@ def test_ssh_uses_batchmode_and_yt_ssh_binary(mock_run: MagicMock, monkeypatch: 
     monkeypatch.setenv("YT_SSH", "/opt/ssh")
     mock_run.return_value = subprocess.CompletedProcess([], 0, "out\n", "")
     result = ssh("media", "ls")
-    assert mock_run.call_args[0][0] == ["/opt/ssh", "-o", "BatchMode=yes", "media", "ls"]
+    argv = mock_run.call_args[0][0]
+    assert argv[0] == "/opt/ssh"
+    assert argv[-2:] == ["media", "ls"]
+    assert "BatchMode=yes" in argv  # the rest of the -o set is pinned by TestConnectionTimeouts
     assert mock_run.call_args[1]["stdin"] is subprocess.DEVNULL
     assert result.stdout == "out\n"
 
@@ -25,7 +29,9 @@ def test_ssh_default_binary_and_tty(mock_run: MagicMock, monkeypatch: pytest.Mon
     monkeypatch.delenv("YT_SSH", raising=False)
     mock_run.return_value = subprocess.CompletedProcess([], 0, None, None)
     result = ssh("media", "sudo thing", tty=True, capture=False)
-    assert mock_run.call_args[0][0][:4] == ["/usr/bin/ssh", "-o", "BatchMode=yes", "-t"]
+    argv = mock_run.call_args[0][0]
+    assert argv[0] == "/usr/bin/ssh"
+    assert "-t" in argv and argv.index("-t") < argv.index("media"), "-t must precede the host"
     assert mock_run.call_args[1]["stdout"] is None
     assert result.stdout == ""
 
@@ -96,3 +102,31 @@ class TestIdGlob:
 
     def test_glob_metacharacters_in_the_id_are_escaped(self) -> None:
         assert id_glob("a*b?c") == r"*\[a\*b\?c\]*"
+
+
+class TestConnectionTimeouts:
+    """Without these, an unreachable VM blocks for the kernel's TCP timeout and a VM
+    that freezes mid-download hangs `yt` forever with no output — the exact failure a
+    long download invites."""
+
+    @patch("yt.ssh.subprocess.run")
+    def test_sets_a_connect_timeout_and_keepalives(self, mock_run: Any) -> None:
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        ssh("media", "true")
+        argv = mock_run.call_args[0][0]
+        options = [argv[i + 1] for i, a in enumerate(argv) if a == "-o"]
+        assert "BatchMode=yes" in options
+        assert "ConnectTimeout=10" in options
+        assert any(o.startswith("ServerAliveInterval=") for o in options)
+        assert any(o.startswith("ServerAliveCountMax=") for o in options)
+
+    @patch("yt.ssh.subprocess.run")
+    def test_keepalive_budget_survives_a_slow_nas(self, mock_run: Any) -> None:
+        """interval * countmax is how long a silent-but-alive connection is tolerated.
+        A NAS busy with an rsync can be quiet for a while; don't drop a good transfer."""
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        ssh("media", "true")
+        argv = mock_run.call_args[0][0]
+        options = dict(o.split("=", 1) for o in (argv[i + 1] for i, a in enumerate(argv) if a == "-o") if "=" in o)
+        budget = int(options["ServerAliveInterval"]) * int(options["ServerAliveCountMax"])
+        assert budget >= 120, f"only {budget}s of silence tolerated — too eager"

@@ -29,8 +29,20 @@ def check_cookies() -> Path:
     return path
 
 
+# ssh(1) uses 255 for its own failures (host unreachable, DNS, key rejected); any other
+# non-zero code came from the remote command itself.
+SSH_CONNECTION_FAILED = 255
+
+
 def check_ytdlp_installed() -> None:
-    if ssh(MEDIA_HOST, "command -v yt-dlp >/dev/null 2>&1").returncode != 0:
+    """The only remote preflight, so it is the first thing a user sees when the VM is down."""
+    result = ssh(MEDIA_HOST, "command -v yt-dlp >/dev/null 2>&1")
+    if result.returncode == SSH_CONNECTION_FAILED:
+        info(f"❌ Could not reach the media VM over SSH (host '{MEDIA_HOST}')")
+        info(f"   Check it is up and that `ssh {MEDIA_HOST} true` works — yt uses BatchMode,")
+        info("   so a passphrase prompt or an unknown host key fails rather than asking.")
+        raise Failure()
+    if result.returncode != 0:
         info("❌ yt-dlp not found on media VM")
         info("   Install it with: yt --update")
         raise Failure()

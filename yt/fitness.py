@@ -325,12 +325,19 @@ def add_to_show(target: str, url: str) -> int:
         info(f"⏱️  [{session.elapsed}] Download + SSD staging complete")
 
         # Stage 1b: write the episode .nfo and name the thumbnail, in the staging dir.
+        # capture=True is load-bearing: the helper prints every sidecar it wrote, and
+        # with capture=False those paths inherit yt's stdout and land there ahead of the
+        # real video path, which breaks `yt -f URL | epm`. Its output is progress, so
+        # it belongs on stderr like every other status line.
         nfo = ssh(
             MEDIA_HOST,
             f"python3 - {q(session.staging_dir)} {q(show)} {q(resolved.season_number)} {q(resolved.episode)}",
             stdin=helper.read_text(),
-            capture=False,
+            capture=True,
         )
+        for written in nfo.stdout.splitlines():
+            if written:
+                info(f"   📝 {written}")
         if nfo.returncode != 0:
             info(f"❌ nfo generation failed — files are on SSD staging: {session.staging_dir}")
             raise Failure()

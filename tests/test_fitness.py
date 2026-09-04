@@ -131,6 +131,19 @@ def _resolve_calls(media: Any) -> list[str]:
     return [c.command for c in media.calls if c.stdin and "next episode number" in c.stdin]
 
 
+def test_nfo_step_captures_its_output_instead_of_inheriting_stdout(
+    media: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """jellyfin_nfo.py prints every sidecar it writes; with capture=False those paths
+    inherit yt's stdout and arrive ahead of the video path, breaking `yt -f URL | epm`."""
+    assert add_to_show("Kettlebell/3", URL) == 0
+    out, err = capsys.readouterr()
+    assert "nfo written" not in out, "helper output must not reach stdout"
+    assert "nfo written" in err, "helper output should still be visible as progress"
+    nfo_call = next(c for c in media.calls if c.command.startswith("python3 -"))
+    assert nfo_call.capture is True
+
+
 def test_fast_path_downloads_and_prints_final_path(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
     assert add_to_show("Kettlebell/3", URL) == 0
     out, err = capsys.readouterr()

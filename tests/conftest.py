@@ -25,6 +25,7 @@ class Call:
     command: str
     stdin: str | None
     tty: bool
+    capture: bool = True
 
     def __contains__(self, needle: str) -> bool:
         return needle in self.command
@@ -60,13 +61,19 @@ class FakeSSH:
         host, command = argv[-2], argv[-1]
         if stdin is None and stdin_path is not None:
             stdin = stdin_path.read_text()
-        call = Call(host, command, stdin, "-t" in argv[:-2])
+        call = Call(host, command, stdin, "-t" in argv[:-2], capture)
         self.calls.append(call)
         for rule in self.rules:
             answer = rule(call)
             if answer is not None:
                 rc, out = answer
-                return subprocess.CompletedProcess(argv, rc, out if capture else "", "")
+                if not capture:
+                    # capture=False makes the real child inherit our stdout
+                    # (ssh.py:25 passes stdout=None). Model that faithfully, so a
+                    # remote command that prints is as visible here as in production.
+                    sys.stdout.write(out)
+                    return subprocess.CompletedProcess(argv, rc, "", "")
+                return subprocess.CompletedProcess(argv, rc, out, "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     def commands(self, host: str | None = None) -> list[str]:

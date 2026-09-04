@@ -31,6 +31,24 @@ def _execute(
     return subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=stdout, text=True, check=False)
 
 
+# Connection options, in one place so every call gets them.
+#   BatchMode           never prompt — a passphrase or unknown host key fails instead of hanging.
+#   ConnectTimeout      an unreachable VM fails in 10s rather than the kernel's TCP timeout.
+#   ServerAlive*        30s x 6 = 3 minutes of silence before giving up on a frozen VM. Generous
+#                       on purpose: a NAS busy with a large rsync can be quiet for a while, and
+#                       dropping a good transfer is worse than waiting.
+SSH_OPTIONS = [
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=10",
+    "-o",
+    "ServerAliveInterval=30",
+    "-o",
+    "ServerAliveCountMax=6",
+]
+
+
 def ssh(
     host: str,
     command: str,
@@ -41,7 +59,7 @@ def ssh(
     tty: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run `command` on `host` with BatchMode. stderr is inherited so remote progress reaches the terminal."""
-    argv = [ssh_binary(), "-o", "BatchMode=yes"]
+    argv = [ssh_binary(), *SSH_OPTIONS]
     if tty:
         argv.append("-t")
     argv += [host, command]

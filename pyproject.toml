@@ -28,6 +28,12 @@ source = ["yt"]
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
+# A floor, not a target. Coverage was measured but never gated, so it could have
+# fallen from 96% to 40% with CI still green. Set just below the current figure so
+# it catches a real regression without going red on a rounding wobble.
+# Note this measures Python only: the bash in remote_scripts.py is covered by
+# tests/test_remote_scripts.py, which coverage.py cannot see.
+fail_under = 94
 
 [tool.ruff]
 line-length = 120

@@ -193,16 +193,20 @@ season numbering, the zsh→Python port, and the 2026-09-04 pass that retired `-
 
 ```sh
 uv sync
-uv run python -m pytest --cov=yt   # 203 tests, no SSH needed (ssh is faked in tests/conftest.py)
+uv run python -m pytest --cov=yt   # 210 tests, no SSH needed (ssh is faked in tests/conftest.py)
 uv run ruff check . && uv run ruff format --check .
 uv run pyright
 ```
 
-The same checks run in GitHub Actions on every push. The tests that run the remote bash scripts for real need
+The same checks run in GitHub Actions on every push, with `uv sync --frozen` so a stale lockfile fails.
+Coverage has a floor (`fail_under` in `pyproject.toml`) — note it measures Python only, not the bash in
+`remote_scripts.py`. The tests that run the remote bash scripts for real need
 bash >= 4 and GNU rsync, and skip without them (macOS ships bash 3.2 and openrsync: `brew install bash rsync`).
 `YT_SSH` swaps the ssh binary (for wrappers or manual stubbing), `YT_NFO_HELPER` points at an alternative nfo
 helper, and `YT_FITNESS_ANSWERS_FROM_STDIN=1` lets the interactive prompts read answers from a pipe.
-The original zsh-era playlist design and plan are kept in [docs/archive/](docs/archive/).
+The original zsh-era playlist design and plan are kept in [docs/archive/](docs/archive/), alongside the
+[2026-09-04 evaluation report](docs/archive/2026-09-04-evaluation-report.md) — a point-in-time audit whose
+unfixed findings are the standing to-do list for this project.
 
 `yt` used to be a zsh function sourced from `~/.zshrc`; that file is gone, so a leftover
 `source .../download-video/yt.sh` line is now a harmless no-op and can be deleted.

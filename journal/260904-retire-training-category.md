@@ -58,6 +58,54 @@ exit-code-through-a-pipe defect the evaluation records as F10 in `playlist.py`.
 `mountpoint -q /mnt/nfs`, would fail on a healthy system every time. F33: refuted, deno and node
 are both installed on the media VM.
 
-**Not done.** 39 findings remain, recorded in the report. Worth doing next: a coverage floor and
-`uv sync --frozen` (nothing gates coverage today), SSH timeouts, and distinguishing an unreachable
-media VM from a missing yt-dlp — currently the former is reported as the latter.
+## Wrap-up: what review caught that I didn't
+
+Two independent passes ran over the finished branch, because the author of a change is the worst
+person to check it. Both found real things, and the pattern is worth recording: **every one of
+them was a second-order effect of a fix, not a miss in the original code.**
+
+- **W5 introduced a cookie leak.** `split_target()` gained validation and is called *inside* the
+  fitness `Session`, after the cookie is uploaded — so a rejected name raised past every cleanup
+  path, leaving `$tmpdir` and a live `cookies.txt` on the media VM. The deeper error was
+  validating the wrong thing: a name that came back from the *remote listing* is an existing
+  directory, not user input, so a real show called `-Rehab` would be listed, offered by the
+  picker, and then rejected. `split_target()` is pure again; `safe_show_name()` is applied only
+  where a user supplies a name.
+- **The retirement notice pre-empted `--update`**, so `yt --update -g` refused to update.
+- **`season_order()` silently dropped an inline `:feed`/`:course`.**
+- **`item.cleanup()` on an archived skip cost an ssh round trip per item** — on a re-run of a
+  200-item playlist, 200 connections to delete 200 empty directories. The script already knows it
+  is an archived skip and already `rmdir`s its tmp dir, so it drops its staging dir there too.
+- **The docs audit found twelve items**, three of them created by W9 — the commit whose whole
+  purpose was doc accuracy. The sharpest: W5 gave `exit 4` a second meaning and §4 still
+  documented only one. `README` still said 133 tests. And my "roughly eight ad-hoc `ssh()` call
+  sites" was a guess; the real count is eleven, which the auditor got by counting.
+
+`id_glob()`'s escaping — the thing I was least sure of — was checked against real `find(1)`
+fnmatch behaviour and holds: the backslashes are for fnmatch, `shlex.quote` then delivers them
+byte-for-byte, and the two layers do not stack.
+
+**Grades.** Confirmed by execution: the subtitle fix (live yt-dlp A/B, `ffprobe` shows a `subrip`
+stream), the traversal fix (sandbox reproduction now exits 4), all five W1 mutations and both W8
+mutations caught, and the `-g` interception. Strongly supported: the staging-leak accounting.
+Suspected and *unsettled*: whether the mkv survived the old subtitle error in a non-429 run —
+irrelevant now that the flags are fixed, but never proven either way.
+
+## What is deliberately not done
+
+- **39 of the 51 findings.** They are in the evaluation report, not lost. The ones worth doing
+  next: a coverage floor and `uv sync --frozen` (nothing gates coverage today, so 96% could fall
+  to 40% and CI stays green); SSH timeouts (`yt` hangs forever on a hung media VM); and
+  distinguishing an unreachable media VM from a missing yt-dlp — the former is currently reported
+  as the latter, sending you to `yt --update`, which fails the same way.
+- **A mount guard.** The live check corrected the fix before it was written: the NFS mounts are
+  `/mnt/nfs/movies` and `/mnt/nfs/downloads`, *not* `/mnt/nfs`, so the obvious
+  `mountpoint -q /mnt/nfs` would fail on a healthy system every time.
+- **Nothing on the NAS was moved.** Files already in `youtube/training/` stay put; the docs say
+  the directory is legacy. Migrating them into fitness shows would be its own job — those files
+  have no `info.json`, so the `.nfo` and thumbnail would have to be synthesised.
+- **`ssh.lines()` is dead code** (no caller, no test) and was left alone: it is on the deferred
+  list, and deleting it was not in this plan's scope.
+- **The three modes still carry near-duplicate download/stage/transfer logic**, and the yt-dlp
+  flag block is copied across eight sites. That is the right long-term fix and it is a rewrite,
+  not a repair.

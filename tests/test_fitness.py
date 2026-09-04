@@ -401,3 +401,35 @@ def test_nfo_failure_keeps_staging_for_recovery(media: Any, capsys: pytest.Captu
     assert "files are on SSD staging" in err
     removed = " ".join(c for c in media.commands() if c.startswith("rm -rf"))
     assert "/mnt/nfs/downloads/yt-staging/yt.stub42" not in removed
+
+
+def test_new_show_prompt_reprompts_on_an_unusable_name(
+    fake_ssh: Any, answers: Callable[[str], None], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Typing `..` at "New show name" must re-ask, not abort the run."""
+    answers("n\n..\nn\nRowing\n1:Form\nfeed\ny\n")
+    target, _order = pick_target("Kettlebell\t1\tBasics\t2\tcourse\n")
+    assert target.startswith("Rowing/")
+    assert "not a usable show name" in capsys.readouterr().err
+
+
+def test_refuses_a_season_dir_resolved_outside_the_fitness_tree(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    """Defence in depth on the NAS path derivation: if the resolve script ever returns a
+    season dir that is not under the fitness base, fail loudly rather than letting
+    removeprefix silently yield an absolute path and hand rsync a doubled destination."""
+    escaped = "/somewhere/else/Season 03"
+    media.rules.insert(
+        0,
+        lambda c: (
+            (0, f"/somewhere/else\n{escaped}\n10\n2\ncourse\n0\n")
+            if c.stdin and "next episode number" in c.stdin
+            else None
+        ),
+    )
+
+    with pytest.raises(Failure):
+        add_to_show("Kettlebell/3", URL)
+
+    err = capsys.readouterr().err
+    assert "outside" in err
+    assert escaped in err

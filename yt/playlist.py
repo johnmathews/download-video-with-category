@@ -110,6 +110,11 @@ def download_playlist(url: str) -> int:
                 basenames = [line for line in result.stdout.splitlines() if line]
                 if not basenames:
                     info(f"⏭️  [{n}/{count}] already downloaded — skipped")
+                    # The item script mkdir -p's its staging dir before it knows the item
+                    # is archived, and stages nothing on this path — so remove it. Without
+                    # this, topping up a 200-item playlist leaves 200 empty dirs on the SSD
+                    # every run, and "something in yt-staging" stops meaning "needs recovery".
+                    item.cleanup()
                     skipped += 1
                     continue
                 if item.nas_transfer(nas_final_dir):

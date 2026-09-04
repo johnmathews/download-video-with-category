@@ -181,3 +181,40 @@ def test_item_script_prefixes_embedded_title_with_index() -> None:
     # Both yt-dlp invocations (main + no-subs retry) must set meta_title so Jellyfin's
     # metadata "Name" sort matches playlist order.
     assert PLAYLIST_ITEM_SCRIPT.count('--parse-metadata "%(playlist_index)03d - %(title)s:%(meta_title)s"') == 2
+
+
+class TestStagingLifecycle:
+    """CLAUDE.md: staging is kept for manual recovery after a NAS failure, and
+    removed otherwise. Both directions need pinning — a refactor that tidies up
+    the keep-paths destroys a fully downloaded episode."""
+
+    def test_archived_skips_do_not_leak_staging_dirs(self, media: Any, capsys: pytest.CaptureFixture[str]) -> None:
+        """Re-running a fully archived playlist is the normal way to top one up.
+        Every per-item staging dir it creates must be removed again."""
+        media.on("bash -s", host="media", stdout="")  # no basenames = archived skip
+        media.rules.insert(0, media.rules.pop())
+
+        assert download_playlist(URL) == 0
+        assert "skipped 3" in capsys.readouterr().err
+
+        removed = " ".join(c for c in media.commands() if c.startswith("rm -rf"))
+        for n in (2, 3, 4):  # stub1 is the cookie session; items are 2..4
+            assert f"/mnt/nfs/downloads/yt-staging/yt.stub{n}" in removed, (
+                f"item {n} leaked its staging dir; rm -rf calls were: {removed}"
+            )
+
+    def test_nas_failure_keeps_every_staged_item_for_recovery(
+        self, media: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        media.rules.insert(0, lambda c: (1, "") if c.host == "nas" else None)
+
+        assert download_playlist(URL) == 1
+        err = capsys.readouterr().err
+        assert "failed 3" in err
+
+        removed = " ".join(c for c in media.commands() if c.startswith("rm -rf"))
+        for n in (2, 3, 4):
+            assert f"/mnt/nfs/downloads/yt-staging/yt.stub{n}" not in removed, (
+                "staging must survive a NAS failure so the files can be recovered by hand"
+            )
+        assert "files remain on SSD" in err

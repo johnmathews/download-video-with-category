@@ -386,3 +386,18 @@ class TestShowNameValidation:
             season_order("../X/1", "feed")
         assert "not a usable show name" in capsys.readouterr().err
         assert fake_ssh.count("bash -s", host="media") == 0
+
+
+def test_nfo_failure_keeps_staging_for_recovery(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    """The video is downloaded and staged by this point; only the sidecar write failed.
+    Removing staging here would destroy a complete download."""
+    media.rules.insert(0, lambda c: (1, "") if "python3 -" in c.command else None)
+
+    with pytest.raises(Failure):
+        add_to_show("Kettlebell/3", URL)
+
+    err = capsys.readouterr().err
+    assert "nfo generation failed" in err
+    assert "files are on SSD staging" in err
+    removed = " ".join(c for c in media.commands() if c.startswith("rm -rf"))
+    assert "/mnt/nfs/downloads/yt-staging/yt.stub42" not in removed

@@ -110,6 +110,8 @@ def download_playlist(url: str) -> int:
                 basenames = [line for line in result.stdout.splitlines() if line]
                 if not basenames:
                     info(f"⏭️  [{n}/{count}] already downloaded — skipped")
+                    # The item script removes its own tmp and staging dirs on this path
+                    # (see PLAYLIST_ITEM_SCRIPT) — no ssh round trip needed here.
                     skipped += 1
                     continue
                 if item.nas_transfer(nas_final_dir):

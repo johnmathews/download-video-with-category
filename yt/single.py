@@ -1,4 +1,4 @@
-"""Single-video mode: `yt -g URL` — download one video into a category directory."""
+"""Single-video mode: `yt -y URL` — download one video into a category directory."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from yt.config import MEDIA_HOST, NAS_FINAL_BASE, REMOTE_FINAL_BASE, SUPPORTED_S
 from yt.cookies import check_cookies, check_ytdlp_installed
 from yt.remote_scripts import SINGLE_ITEM_SCRIPT
 from yt.session import Session
-from yt.ssh import q, run_script, ssh
+from yt.ssh import id_glob, q, run_script, ssh
 from yt.ui import Failure, emit, format_size, info
 
 _SUPPORTED_URL_RE = re.compile(r"^https?://(www\.)?(" + "|".join(re.escape(s) for s in SUPPORTED_SITES) + ")")
@@ -34,14 +34,23 @@ def fetch_video_info(cookie: str, url: str) -> tuple[str, str, str, str]:
     return parts[0], parts[1], parts[2], parts[3]
 
 
-def _height(quality: str) -> int:
+def _height(quality: str) -> int | None:
+    """Pixel height from '<n>p', or None when nobody could tell us.
+
+    yt-dlp prints 'NA' for height on some formats and existing_quality() falls back
+    to '0p' when ffprobe fails. Both used to collapse to 0, which made the
+    `new <= old` comparison below always true and turned "we don't know" into
+    "the file you already have is better".
+    """
     digits = quality.strip().removesuffix("p")
-    return int(digits) if digits.isdigit() else 0
+    if not digits.isdigit() or int(digits) == 0:
+        return None
+    return int(digits)
 
 
 def find_existing(final_dir: str, video_id: str) -> str:
     """Path of an already-downloaded file carrying [video_id] in its name, or ''."""
-    result = ssh(MEDIA_HOST, f"find {q(final_dir)} -type f -name '*\\[{video_id}\\]*' 2>/dev/null | head -1")
+    result = ssh(MEDIA_HOST, f"find {q(final_dir)} -type f -name {q(id_glob(video_id))} 2>/dev/null | head -1")
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
@@ -92,7 +101,21 @@ def download_single(category: str, url: str) -> int:
             old_quality = existing_quality(existing)
             info(f"   Existing quality: {old_quality}")
             info(f"   New quality: {new_quality}")
-            if _height(new_quality) <= _height(old_quality):
+            new_height, old_height = _height(new_quality), _height(old_quality)
+            if new_height is None or old_height is None:
+                info()
+                if new_height is None:
+                    info("❌ Could not determine the new video's quality — refusing to guess")
+                    info(f"   yt-dlp reported no usable height for: {url}")
+                else:
+                    info("❌ Could not determine the existing file's quality — refusing to guess")
+                    info(f"   ffprobe could not read: {existing}")
+                info("   Nothing was downloaded and nothing was changed.")
+                info(f"   To download anyway, delete: {existing}")
+                info("   If yt-dlp on the media VM is stale, run: yt --update")
+                session.cleanup()
+                raise Failure()
+            if new_height <= old_height:
                 info()
                 info("❌ Skipping download - existing file has equal or better quality")
                 info(f"   To force re-download, delete: {existing}")

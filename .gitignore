@@ -7,3 +7,11 @@ htmlcov/
 .pytest_cache/
 dist/
 .DS_Store
+.engineering-team/
+
+# Credentials. `yt` copies a live YouTube cookies.txt to the media VM; one landing
+# here would be a real leak, and the file it reads is named exactly this.
+cookies.txt
+.env
+*.pem
+*.key

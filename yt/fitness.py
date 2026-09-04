@@ -22,7 +22,7 @@ from yt.config import (
 from yt.cookies import check_cookies, check_ytdlp_installed
 from yt.remote_scripts import FITNESS_ITEM_SCRIPT, FITNESS_LIST_SCRIPT, FITNESS_RESOLVE_SCRIPT
 from yt.session import Session
-from yt.ssh import q, run_script, ssh
+from yt.ssh import id_glob, q, run_script, ssh
 from yt.ui import Failure, emit, info, interactive, prompt
 
 ORDERS = ("feed", "course")
@@ -113,7 +113,10 @@ def pick_target(listing: str) -> tuple[str, str | None]:
             answer = _ask("New show name: ")
             if not answer:
                 continue
-            picked_show, new_show = answer, True
+            try:
+                picked_show, new_show = safe_show_name(answer), True
+            except Failure:
+                continue
         elif answer.isdigit() and 1 <= int(answer) <= len(shows):
             picked_show = shows[int(answer) - 1]
         else:
@@ -177,8 +180,31 @@ def resolve(fitness_base: str, show: str, spec: str, set_order: str) -> Resolved
     )
 
 
+def safe_show_name(name: str) -> str:
+    """A show name that is safe to use as a directory name under the fitness tree.
+
+    The show is the *only* user-supplied path component — season directories are
+    always "Season NN" and episode names are built from the resolved numbers — so
+    this is the whole traversal surface. Real library names include
+    "Mobility & Physio" and "Combat Sports", so spaces, "&" and non-ASCII must all
+    survive; only path-significant forms are rejected.
+    """
+    cleaned = name.strip()
+    if not cleaned or "/" in cleaned or cleaned.startswith((".", "-")) or any(c in cleaned for c in "\0\n\r"):
+        info(f"❌ {name!r} is not a usable show name")
+        info("   A show becomes a directory in the fitness library:")
+        info("   no '/', no leading '.' or '-', and not empty.")
+        raise Failure()
+    return cleaned
+
+
 def split_target(target: str) -> tuple[str, str, str]:
-    """'Show/spec[:feed|course]' → (show, spec, order-or-'')."""
+    """'Show/spec[:feed|course]' → (show, spec, order-or-'').
+
+    Deliberately does not validate: it is also used on targets built from the remote
+    listing, where the show name is an existing directory rather than user input.
+    Call `safe_show_name()` at the points where a user supplies the name.
+    """
     show, spec = target.split("/", 1)
     order = ""
     for candidate in ORDERS:
@@ -203,7 +229,7 @@ def _fetch_info(cookie: str, url: str) -> tuple[str, str, str]:
 def _find_in_show(show_dir: str, video_id: str) -> str:
     result = ssh(
         MEDIA_HOST,
-        f"find {q(show_dir)} -type f \\( -name '*.mkv' -o -name '*.mp4' \\) -name '*\\[{video_id}\\]*' "
+        f"find {q(show_dir)} -type f \\( -name '*.mkv' -o -name '*.mp4' \\) -name {q(id_glob(video_id))} "
         "2>/dev/null | head -1",
     )
     return result.stdout.strip() if result.returncode == 0 else ""
@@ -239,6 +265,10 @@ def add_to_show(target: str, url: str) -> int:
     cookies = check_cookies()
     check_ytdlp_installed()
     fitness_base = f"{REMOTE_FINAL_BASE}/{FITNESS_SUBDIR}"
+    if target:
+        # Reject an unusable show name before opening a remote session, so nothing
+        # has been uploaded when it fails.
+        safe_show_name(split_target(target)[0])
 
     with Session().open() as session:
         session.upload_cookie(cookies)
@@ -325,17 +355,30 @@ def add_to_show(target: str, url: str) -> int:
         info(f"⏱️  [{session.elapsed}] Download + SSD staging complete")
 
         # Stage 1b: write the episode .nfo and name the thumbnail, in the staging dir.
+        # capture=True is load-bearing: the helper prints every sidecar it wrote, and
+        # with capture=False those paths inherit yt's stdout and land there ahead of the
+        # real video path, which breaks `yt -f URL | epm`. Its output is progress, so
+        # it belongs on stderr like every other status line.
         nfo = ssh(
             MEDIA_HOST,
             f"python3 - {q(session.staging_dir)} {q(show)} {q(resolved.season_number)} {q(resolved.episode)}",
             stdin=helper.read_text(),
-            capture=False,
+            capture=True,
         )
+        for written in nfo.stdout.splitlines():
+            if written:
+                info(f"   📝 {written}")
         if nfo.returncode != 0:
             info(f"❌ nfo generation failed — files are on SSD staging: {session.staging_dir}")
             raise Failure()
 
         # Stage 2: NAS-local SSD -> HDD into the season dir.
+        # str.removeprefix is a no-op when the prefix is absent, which would silently
+        # turn season_rel into an absolute path and send rsync somewhere unintended.
+        if not resolved.season_dir.startswith(fitness_base + "/"):
+            info(f"❌ Resolved season dir is outside {fitness_base}: {resolved.season_dir}")
+            info(f"   Files are on SSD staging: {session.staging_dir}")
+            raise Failure()
         season_rel = resolved.season_dir.removeprefix(fitness_base + "/")
         nas_season_dir = f"{NAS_FINAL_BASE}/{FITNESS_SUBDIR}/{season_rel}"
         info(f"📀 [{session.elapsed}] Transferring to HDD on NAS...")
@@ -362,7 +405,9 @@ def season_order(target: str, order: str) -> int:
         info("❌ order must be feed or course")
         raise Failure()
     fitness_base = f"{REMOTE_FINAL_BASE}/{FITNESS_SUBDIR}"
-    show, spec = target.split("/", 1)
+    show, spec, inline_order = split_target(target)
+    safe_show_name(show)
+    order = order or inline_order
     resolved = resolve(fitness_base, show, spec, order)
     if resolved is None:
         info(f"❌ Could not resolve {target}")

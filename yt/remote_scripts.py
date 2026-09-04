@@ -4,6 +4,15 @@ These are deliberately kept as shell: they run where yt-dlp, rsync and the NFS m
 and they take their inputs as positional arguments (never interpolated), so the Python side
 only ever quotes. Remote stdout is reserved for video basenames / structured results; all
 progress goes to stderr.
+
+Subtitle flags (all three download scripts, keep them in step):
+  --sub-format "srt/ttml/vtt/best"  NOT srv3. `--sub-format` is a preference list, and
+      YouTube offers srv3 for every auto-translated track, so srv3 used to win — then
+      `--convert-subs srt` handed it to ffmpeg, which has no srv3 demuxer, and yt-dlp
+      exited 1. srt makes the conversion a no-op; ttml takes yt-dlp's own dfxp2srt path.
+  --sub-langs "en,en-orig,en-US,en-GB"  NOT "en.*". yt-dlp names auto-translations
+      "<target>-<source>", so the glob also matched en-en and en-de — extra tracks, each
+      costing a --sleep-subtitles pause, which is what produced HTTP 429.
 """
 
 # Stage-2 transfer script (NAS-local SSD swift -> HDD tank), shared by every mode.
@@ -45,12 +54,12 @@ yt-dlp \
   --embed-chapters \
   --embed-thumbnail \
   --convert-thumbnails jpg \
-  --sub-langs "en.*" \
+  --sub-langs "en,en-orig,en-US,en-GB" \
   --write-subs \
   --write-auto-subs \
   --embed-subs \
   --convert-subs srt \
-  --sub-format "srv3/ttml/vtt/best" \
+  --sub-format "srt/ttml/vtt/best" \
   --sleep-subtitles 1 \
   -f bestvideo+bestaudio \
   --merge-output-format mkv \
@@ -132,12 +141,12 @@ yt-dlp \
   --embed-chapters \
   --embed-thumbnail \
   --convert-thumbnails jpg \
-  --sub-langs "en.*" \
+  --sub-langs "en,en-orig,en-US,en-GB" \
   --write-subs \
   --write-auto-subs \
   --embed-subs \
   --convert-subs srt \
-  --sub-format "srv3/ttml/vtt/best" \
+  --sub-format "srt/ttml/vtt/best" \
   --sleep-subtitles 1 \
   -f bestvideo+bestaudio \
   --merge-output-format mkv \
@@ -177,6 +186,10 @@ if (( ${#video_files[@]} == 0 )); then
   # genuine download failure that must not be silently counted as skipped.
   rmdir "$tmpdir" 2>/dev/null || rm -rf "$tmpdir"
   if (( rc == 0 )); then
+    # Archived skip: nothing was staged, so drop the staging dir this script created.
+    # Doing it here rather than from Python saves an ssh round trip per skipped item —
+    # a re-run of a fully archived playlist is otherwise one connection per item.
+    rmdir "$staging_dir" 2>/dev/null || true
     exit 0   # archived skip — emit nothing
   else
     exit 3   # genuine download failure — emit nothing
@@ -225,10 +238,16 @@ exit 0
 #              "4:Mobility" (create Season 04 titled Mobility; creates the show too)
 # order: feed = newest first, episodes numbered DOWN from 999; course = oldest first, 1..N.
 # stdout (6 lines): <show dir> <season dir> <next episode number> <episode digits> <order> <order-was-missing 0|1>
-# exit 4 = season/show not found and no ":Name" given to create it.
+# exit 4 = unsafe show name, or season/show not found and no ":Name" given to create it.
 FITNESS_RESOLVE_SCRIPT = r"""
 set -euo pipefail
 base="$1"; show="$2"; spec="$3"; set_order="${4:-}"
+# The show is the only user-supplied path component; season dirs are always
+# "Season NN". Reject anything that would escape $base or create a hidden dir.
+# The Python side validates too — this is defence in depth for any other caller.
+case "$show" in
+  ""|.*|*/*) echo "❌ unsafe show name: $show" >&2; exit 4 ;;
+esac
 show_dir="$base/$show"
 create_name=""
 case "$spec" in *:*) create_name="${spec#*:}"; spec="${spec%%:*}" ;; esac
@@ -325,7 +344,7 @@ dl() {
     -o "$tmpdir/%(uploader)s-%(title)s-[%(id)s].%(ext)s" \
     "$url" >&2
 }
-dl --sub-langs "en.*" --write-subs --write-auto-subs --embed-subs --convert-subs srt --sub-format "srv3/ttml/vtt/best" --sleep-subtitles 1 || true
+dl --sub-langs "en,en-orig,en-US,en-GB" --write-subs --write-auto-subs --embed-subs --convert-subs srt --sub-format "srt/ttml/vtt/best" --sleep-subtitles 1 || true
 shopt -s nullglob
 video_files=("$tmpdir"/*.{mkv,mp4})
 if (( ${#video_files[@]} == 0 )); then

@@ -8,7 +8,16 @@ from typing import Any
 
 import pytest
 
-from yt.fitness import Resolved, add_to_show, ask_order, parse_listing, pick_target, season_order, split_target
+from yt.fitness import (
+    Resolved,
+    add_to_show,
+    ask_order,
+    parse_listing,
+    pick_target,
+    safe_show_name,
+    season_order,
+    split_target,
+)
 from yt.ui import Failure
 
 URL = "https://youtu.be/abcDEF12345"
@@ -129,6 +138,19 @@ def media(fake_ssh: Any, cookies: Path, answers: Callable[[str], None]) -> Any:
 
 def _resolve_calls(media: Any) -> list[str]:
     return [c.command for c in media.calls if c.stdin and "next episode number" in c.stdin]
+
+
+def test_nfo_step_captures_its_output_instead_of_inheriting_stdout(
+    media: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """jellyfin_nfo.py prints every sidecar it writes; with capture=False those paths
+    inherit yt's stdout and arrive ahead of the video path, breaking `yt -f URL | epm`."""
+    assert add_to_show("Kettlebell/3", URL) == 0
+    out, err = capsys.readouterr()
+    assert "nfo written" not in out, "helper output must not reach stdout"
+    assert "nfo written" in err, "helper output should still be visible as progress"
+    nfo_call = next(c for c in media.calls if c.command.startswith("python3 -"))
+    assert nfo_call.capture is True
 
 
 def test_fast_path_downloads_and_prints_final_path(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
@@ -336,3 +358,78 @@ class TestSeasonOrder:
     def test_requires_target(self, media: Any) -> None:
         with pytest.raises(Failure):
             season_order("Kettlebell", "")
+
+
+class TestShowNameValidation:
+    """The show is the only user-controlled path component: the season directory is
+    always "Season NN", so `..` in a show name is the whole traversal surface."""
+
+    @pytest.mark.parametrize("bad", ["..", ".", "../Escape", "-rf", "", "  "])
+    def test_rejects_unsafe_show_names_before_any_remote_call(
+        self, bad: str, fake_ssh: Any, cookies: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_ssh.on("mktemp -d", stdout="/tmp/yt.stub42\n")
+        with pytest.raises(Failure):
+            add_to_show(f"{bad}/1:X", URL)
+        assert "not a usable show name" in capsys.readouterr().err
+        assert fake_ssh.count("bash -s", host="media") == 0, "must reject before touching the media VM"
+
+    @pytest.mark.parametrize("good", ["Mobility & Physio", "Combat Sports", "Heavy Club", "Kettlebell"])
+    def test_accepts_the_show_names_the_library_actually_uses(self, good: str) -> None:
+        assert safe_show_name(good) == good
+
+    def test_strips_surrounding_whitespace(self) -> None:
+        assert safe_show_name("  Kettlebell  ") == "Kettlebell"
+
+    def test_season_order_rejects_unsafe_names_too(self, fake_ssh: Any, capsys: pytest.CaptureFixture[str]) -> None:
+        with pytest.raises(Failure):
+            season_order("../X/1", "feed")
+        assert "not a usable show name" in capsys.readouterr().err
+        assert fake_ssh.count("bash -s", host="media") == 0
+
+
+def test_nfo_failure_keeps_staging_for_recovery(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    """The video is downloaded and staged by this point; only the sidecar write failed.
+    Removing staging here would destroy a complete download."""
+    media.rules.insert(0, lambda c: (1, "") if "python3 -" in c.command else None)
+
+    with pytest.raises(Failure):
+        add_to_show("Kettlebell/3", URL)
+
+    err = capsys.readouterr().err
+    assert "nfo generation failed" in err
+    assert "files are on SSD staging" in err
+    removed = " ".join(c for c in media.commands() if c.startswith("rm -rf"))
+    assert "/mnt/nfs/downloads/yt-staging/yt.stub42" not in removed
+
+
+def test_new_show_prompt_reprompts_on_an_unusable_name(
+    fake_ssh: Any, answers: Callable[[str], None], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Typing `..` at "New show name" must re-ask, not abort the run."""
+    answers("n\n..\nn\nRowing\n1:Form\nfeed\ny\n")
+    target, _order = pick_target("Kettlebell\t1\tBasics\t2\tcourse\n")
+    assert target.startswith("Rowing/")
+    assert "not a usable show name" in capsys.readouterr().err
+
+
+def test_refuses_a_season_dir_resolved_outside_the_fitness_tree(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    """Defence in depth on the NAS path derivation: if the resolve script ever returns a
+    season dir that is not under the fitness base, fail loudly rather than letting
+    removeprefix silently yield an absolute path and hand rsync a doubled destination."""
+    escaped = "/somewhere/else/Season 03"
+    media.rules.insert(
+        0,
+        lambda c: (
+            (0, f"/somewhere/else\n{escaped}\n10\n2\ncourse\n0\n")
+            if c.stdin and "next episode number" in c.stdin
+            else None
+        ),
+    )
+
+    with pytest.raises(Failure):
+        add_to_show("Kettlebell/3", URL)
+
+    err = capsys.readouterr().err
+    assert "outside" in err
+    assert escaped in err

@@ -31,7 +31,7 @@ class TestHelp:
 
     def test_help_lists_every_category(self) -> None:
         text = help_text()
-        for flag, name in [("g", "training"), ("h", "humanity"), ("e", "math+engineering")]:
+        for flag, name in [("y", "youtube"), ("h", "humanity"), ("e", "math+engineering")]:
             assert f"-{flag}  {name}" in text
 
 
@@ -39,15 +39,14 @@ class TestCategoryDispatch:
     @pytest.mark.parametrize(
         ("argv", "category"),
         [
-            (["-g", "https://youtu.be/x"], "training"),
             (["-y", "https://youtu.be/x"], "youtube"),
             (["-c", "https://youtu.be/x"], "create"),
             (["-m", "https://youtu.be/x"], "music"),
             (["-h", "https://youtu.be/x"], "humanity"),
             (["-t", "https://youtu.be/x"], "travel"),
             (["-e", "https://youtu.be/x"], "math+engineering"),
-            (["--category", "training", "https://youtu.be/x"], "training"),
-            (["https://youtu.be/x", "-g"], "training"),
+            (["--category", "music", "https://youtu.be/x"], "music"),
+            (["https://youtu.be/x", "-y"], "youtube"),
         ],
     )
     def test_maps_flag_to_category(self, argv: list[str], category: str) -> None:
@@ -63,10 +62,10 @@ class TestCategoryDispatch:
         assert _run(["--category", "bogus", "https://youtu.be/x"]) == 1
         err = capsys.readouterr().err
         assert "Invalid category 'bogus'" in err
-        assert "training, youtube, create" in err
+        assert "youtube, create, music" in err
 
     def test_missing_url(self, capsys: pytest.CaptureFixture[str]) -> None:
-        assert _run(["-g"]) == 1
+        assert _run(["-y"]) == 1
         assert "URL is required" in capsys.readouterr().err
 
     def test_unknown_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
@@ -92,7 +91,7 @@ class TestPlaylistDispatch:
 
 class TestFitnessDispatch:
     def test_rejects_category_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
-        assert _run(["-f", "-g", "https://youtu.be/x"]) == 1
+        assert _run(["-f", "-y", "https://youtu.be/x"]) == 1
         assert "cannot be combined" in capsys.readouterr().err
 
     def test_requires_url(self, capsys: pytest.CaptureFixture[str]) -> None:
@@ -134,8 +133,63 @@ class TestMainExitCodes:
         from yt.ui import Failure
 
         with patch.object(cli, "run", side_effect=Failure("nope", 4)):
-            assert _run(["-g", "u"]) == 4
+            assert _run(["-y", "u"]) == 4
 
     def test_keyboard_interrupt(self) -> None:
         with patch.object(cli, "run", side_effect=KeyboardInterrupt):
-            assert _run(["-g", "u"]) == 130
+            assert _run(["-y", "u"]) == 130
+
+
+class TestRetiredTrainingCategory:
+    """`-g`/training filed gym videos flat into youtube/training/. `yt -f` supersedes
+    it by filing them as Jellyfin Health & Fitness episodes, so -g is retired — but
+    it stays intercepted, because it is in muscle memory and an argparse
+    "unrecognized arguments" error would not tell anyone what to do instead."""
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["-g", "https://youtu.be/x"],
+            ["https://youtu.be/x", "-g"],
+            ["--category", "training", "https://youtu.be/x"],
+        ],
+    )
+    def test_points_at_fitness_mode_and_fails(self, argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+        with patch("yt.single.download_single") as dl:
+            assert _run(argv) == 1
+        dl.assert_not_called()
+        err = capsys.readouterr().err
+        assert "retired" in err
+        assert "yt -f" in err
+
+    def test_does_not_pre_empt_update(self) -> None:
+        """`yt --update -g` should still update yt-dlp: the retirement notice is about
+        a category, and --update takes no category."""
+        with patch.object(cli, "ssh") as ssh_mock:
+            ssh_mock.return_value.returncode = 0
+            assert run(["--update", "-g"]) == 0
+        assert ssh_mock.called, "the retirement check swallowed --update"
+
+    def test_says_the_old_directory_is_left_alone(self, capsys: pytest.CaptureFixture[str]) -> None:
+        _run(["-g", "https://youtu.be/x"])
+        assert "youtube/training/" in capsys.readouterr().err
+
+    def test_training_is_no_longer_a_valid_category(self) -> None:
+        from yt.config import CATEGORIES, VALID_CATEGORIES
+
+        assert "training" not in VALID_CATEGORIES
+        assert "g" not in CATEGORIES
+
+    def test_help_no_longer_advertises_it(self) -> None:
+        text = help_text()
+        assert "-g  training" not in text
+        assert "--category training" not in text
+        # One mention survives on purpose: the note saying the old directory is legacy.
+        mentions = [line for line in text.splitlines() if "training" in line]
+        assert len(mentions) == 1 and "Legacy" in mentions[0], mentions
+
+    def test_the_surviving_categories_still_dispatch(self) -> None:
+        for flag, name in [("y", "youtube"), ("m", "music"), ("h", "humanity"), ("e", "math+engineering")]:
+            with patch("yt.single.download_single", return_value=0) as dl:
+                assert run([f"-{flag}", "https://youtu.be/x"]) == 0
+            dl.assert_called_once_with(name, "https://youtu.be/x")

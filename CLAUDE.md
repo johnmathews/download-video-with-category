@@ -14,11 +14,13 @@ Read it before changing anything.
 
 ## Key rules
 
-- **stdout is for final file paths only**; every status line goes through `ui.info()` (stderr). `yt -g URL | epm`
-  depends on this.
+- **stdout is for final file paths only**; every status line goes through `ui.info()` (stderr). `yt -y URL | epm`
+  depends on this. A remote call that prints must use `capture=True` — `capture=False` makes the child inherit
+  yt's stdout.
 - **All remote calls go through `yt/ssh.py`.** Never call `subprocess` elsewhere. Remote scripts in
   `yt/remote_scripts.py` receive inputs as `bash -s -- args…` positionals via `ssh.run_script()`, which quotes
-  every argument — do not interpolate values into script text.
+  every argument. Ad-hoc `ssh()` f-string commands must apply `ssh.q()` to every embedded value themselves, and
+  `ssh.id_glob()` for a `find -name` pattern.
 - **Remote scripts stay bash** and are copied verbatim from the zsh original; edit them only for remote-side
   behaviour. Their stdout contracts are listed in `docs/architecture.md` §4.
 - `yt/jellyfin_nfo.py` runs on the media VM via `python3 -` over stdin: stdlib only, no `from yt import …`.
@@ -29,8 +31,9 @@ Read it before changing anything.
 
 ## Adding a category
 
-Add one line to `CATEGORIES` in `yt/config.py`. The flag, validation, help text and README table derive from it
-(update the README table by hand).
+Add one line to `CATEGORIES` in `yt/config.py`. The flag, validation and `--help` text derive from it; **the
+README category table does not — update that by hand.** `-g`/`training` is retired: `cli.py` still parses `-g`
+and `--category training` so it can print a pointer to `yt -f`.
 
 ## Testing, lint, types
 
@@ -45,6 +48,10 @@ records calls and answers by rules keyed on the command text and (for the fitnes
 stdin. `answers("y\n")` feeds prompt input; it also sets `YT_FITNESS_ANSWERS_FROM_STDIN=1` so `ui.interactive()`
 is true without a tty. When patching mode functions from CLI tests, patch `yt.single.download_single` etc. —
 `cli.py` imports the modules, not the names, precisely so those patches take effect.
+
+The bash in `yt/remote_scripts.py` is additionally run for real: the `run_remote` fixture pipes a script to
+`bash -s -- args…` against a temp tree with the real `rsync` and a fake `yt-dlp` (`fake_bin`, driven by
+`FAKE_YTDLP_*`). Those tests are marked `@requires_remote_tools` and skip without bash >= 4 and GNU rsync.
 
 ## Journal
 

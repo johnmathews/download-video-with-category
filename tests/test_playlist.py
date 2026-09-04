@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -13,6 +12,10 @@ import pytest
 from yt.playlist import download_playlist, slugify
 from yt.remote_scripts import PLAYLIST_ITEM_SCRIPT
 from yt.ui import Failure
+
+from .conftest import requires_remote_tools
+
+Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 URL = "https://www.youtube.com/playlist?list=PLtest"
 
@@ -130,78 +133,46 @@ def test_missing_cookie_file(
 
 
 # ---------------------------------------------------------------------------
-# The item script itself, run locally under bash with a fake yt-dlp and rsync.
+# The item script itself, run for real under bash (shared harness in conftest.py).
 # ---------------------------------------------------------------------------
 
-FAKE_YTDLP = """#!/usr/bin/env bash
-mode="${FAKE_YTDLP_MODE:-skip}"
-case "$mode" in
-  success) touch "${FAKE_TMPDIR:?}/001-fake-video-[abcd1234].mkv"; exit 0 ;;
-  skip) exit 0 ;;
-  fail) exit 1 ;;
-esac
-"""
-
-FAKE_RSYNC = """#!/usr/bin/env bash
-args=("$@"); dest="${args[-1]}"; mkdir -p "$dest"
-for arg in "${args[@]}"; do case "$arg" in -*) ;; *) [ -f "$arg" ] && mv "$arg" "$dest/" ;; esac; done
-exit 0
-"""
+VIDEO = "001-fake-video-[abcd1234].mkv"
 
 
-@pytest.fixture
-def fake_bin(tmp_path: Path) -> Path:
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    for name, body in (("yt-dlp", FAKE_YTDLP), ("rsync", FAKE_RSYNC)):
-        script = bindir / name
-        script.write_text(body)
-        script.chmod(0o755)
-    return bindir
-
-
-def _run_item_script(fake_bin: Path, tmp_path: Path, mode: str) -> subprocess.CompletedProcess[str]:
+def _run_item_script(run_remote: Runner, tmp_path: Path, **env: str) -> subprocess.CompletedProcess[str]:
     idir = tmp_path / "item"
-    staging = tmp_path / "staging"
     idir.mkdir()
-    staging.mkdir()
     cookie = tmp_path / "cookies.txt"
     cookie.write_text("fake\n")
-    env = {**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}", "FAKE_YTDLP_MODE": mode, "FAKE_TMPDIR": str(idir)}
-    return subprocess.run(
-        [
-            "bash",
-            "-s",
-            "--",
-            str(idir),
-            str(cookie),
-            str(staging),
-            "https://fake/url",
-            "1",
-            str(tmp_path / "archive.txt"),
-        ],
-        input=PLAYLIST_ITEM_SCRIPT,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
+    return run_remote(
+        PLAYLIST_ITEM_SCRIPT,
+        idir,
+        cookie,
+        tmp_path / "staging",
+        "https://fake/url",
+        "1",
+        tmp_path / "archive.txt",
+        **env,
     )
 
 
-def test_item_script_success_emits_basename(fake_bin: Path, tmp_path: Path) -> None:
-    result = _run_item_script(fake_bin, tmp_path, "success")
+@requires_remote_tools
+def test_item_script_success_emits_basename(run_remote: Runner, tmp_path: Path) -> None:
+    result = _run_item_script(run_remote, tmp_path, FAKE_YTDLP_FILES=VIDEO)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "001-fake-video-[abcd1234].mkv"
+    assert result.stdout.strip() == VIDEO
 
 
-def test_item_script_archived_skip(fake_bin: Path, tmp_path: Path) -> None:
-    result = _run_item_script(fake_bin, tmp_path, "skip")
+@requires_remote_tools
+def test_item_script_archived_skip(run_remote: Runner, tmp_path: Path) -> None:
+    result = _run_item_script(run_remote, tmp_path, FAKE_YTDLP_MODE="skip")
     assert result.returncode == 0
     assert result.stdout == ""
 
 
-def test_item_script_real_failure_exits_3(fake_bin: Path, tmp_path: Path) -> None:
-    result = _run_item_script(fake_bin, tmp_path, "fail")
+@requires_remote_tools
+def test_item_script_real_failure_exits_3(run_remote: Runner, tmp_path: Path) -> None:
+    result = _run_item_script(run_remote, tmp_path, FAKE_YTDLP_MODE="fail")
     assert result.returncode == 3
     assert result.stdout == ""
 
@@ -210,3 +181,54 @@ def test_item_script_prefixes_embedded_title_with_index() -> None:
     # Both yt-dlp invocations (main + no-subs retry) must set meta_title so Jellyfin's
     # metadata "Name" sort matches playlist order.
     assert PLAYLIST_ITEM_SCRIPT.count('--parse-metadata "%(playlist_index)03d - %(title)s:%(meta_title)s"') == 2
+
+
+class TestStagingLifecycle:
+    """CLAUDE.md: staging is kept for manual recovery after a NAS failure, and
+    removed otherwise. Both directions need pinning — a refactor that tidies up
+    the keep-paths destroys a fully downloaded episode."""
+
+    def test_nas_failure_keeps_every_staged_item_for_recovery(
+        self, media: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        media.rules.insert(0, lambda c: (1, "") if c.host == "nas" else None)
+
+        assert download_playlist(URL) == 1
+        err = capsys.readouterr().err
+        assert "failed 3" in err
+
+        removed = " ".join(c for c in media.commands() if c.startswith("rm -rf"))
+        for n in (2, 3, 4):
+            assert f"/mnt/nfs/downloads/yt-staging/yt.stub{n}" not in removed, (
+                "staging must survive a NAS failure so the files can be recovered by hand"
+            )
+        assert "files remain on SSD" in err
+
+
+@requires_remote_tools
+def test_item_script_archived_skip_removes_its_own_staging_dir(run_remote: Runner, tmp_path: Path) -> None:
+    """The script mkdir -p's the staging dir before it knows the item is archived.
+    Re-running a fully archived playlist is the normal way to top one up, so a dir
+    left behind per item accumulates forever — and destroys the signal that anything
+    still in yt-staging needs manual recovery."""
+    idir = tmp_path / "item"
+    idir.mkdir()
+    cookie = tmp_path / "cookies.txt"
+    cookie.write_text("fake\n")
+    staging = tmp_path / "staging"
+
+    result = run_remote(
+        PLAYLIST_ITEM_SCRIPT,
+        idir,
+        cookie,
+        staging,
+        "https://fake/url",
+        "1",
+        tmp_path / "archive.txt",
+        FAKE_YTDLP_MODE="skip",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert not staging.exists(), "archived skip left its staging dir behind"
+    assert not idir.exists(), "archived skip left its tmp dir behind"

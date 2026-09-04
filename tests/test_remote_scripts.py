@@ -9,6 +9,7 @@ runs the actual script — the same text that is piped to the media VM and the N
 
 from __future__ import annotations
 
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -20,6 +21,7 @@ from yt.remote_scripts import (
     FITNESS_LIST_SCRIPT,
     FITNESS_RESOLVE_SCRIPT,
     NAS_SCRIPT,
+    PLAYLIST_ITEM_SCRIPT,
     SINGLE_ITEM_SCRIPT,
 )
 
@@ -393,3 +395,58 @@ class TestFitnessItemScript:
         assert result.returncode == 0, result.stderr
         assert not cookie.exists()
         assert not tmpdir.exists()
+
+
+# ---------------------------------------------------------------------------
+# Subtitle flags, shared by all three download scripts.
+#
+# `--sub-format "srv3/..."` is a preference list, so srv3 wins whenever YouTube
+# offers it — which it does for every auto-translated track. ffmpeg has no srv3
+# demuxer, so `--convert-subs srt` then fails and yt-dlp exits 1. Observed
+# against live yt-dlp 2026.08.19.
+# ---------------------------------------------------------------------------
+
+DOWNLOAD_SCRIPTS = {
+    "single": SINGLE_ITEM_SCRIPT,
+    "playlist": PLAYLIST_ITEM_SCRIPT,
+    "fitness": FITNESS_ITEM_SCRIPT,
+}
+
+
+class TestSubtitleFlags:
+    @pytest.mark.parametrize("name", sorted(DOWNLOAD_SCRIPTS))
+    def test_never_requests_srv3(self, name: str) -> None:
+        """srv3 cannot be converted to srt: ffmpeg cannot read it.
+
+        Asserted against the --sub-format value only — the sidecar-cleanup line
+        legitimately names srv3 among the extensions it removes.
+        """
+        requested = re.findall(r'--sub-format "([^"]+)"', DOWNLOAD_SCRIPTS[name])
+        assert requested, f"{name} passes no --sub-format"
+        assert all("srv3" not in value for value in requested), f"{name} still prefers srv3: {requested}"
+
+    @pytest.mark.parametrize("name", sorted(DOWNLOAD_SCRIPTS))
+    def test_prefers_a_format_convert_subs_can_handle(self, name: str) -> None:
+        """srt makes --convert-subs a no-op; ttml takes yt-dlp's own dfxp2srt path."""
+        assert '--sub-format "srt/ttml/vtt/best"' in DOWNLOAD_SCRIPTS[name]
+
+    @pytest.mark.parametrize("name", sorted(DOWNLOAD_SCRIPTS))
+    def test_does_not_glob_auto_translated_tracks(self, name: str) -> None:
+        """`en.*` also matches en-en / en-de — auto-translations, each costing a
+        --sleep-subtitles pause, which is what triggered HTTP 429."""
+        assert '--sub-langs "en.*"' not in DOWNLOAD_SCRIPTS[name]
+        assert '--sub-langs "en,en-orig,en-US,en-GB"' in DOWNLOAD_SCRIPTS[name]
+
+    def test_the_flags_actually_reach_ytdlp(
+        self, run_remote: Runner, tmp_path: Path, ytdlp_calls: Callable[[], list[str]]
+    ) -> None:
+        tmpdir = tmp_path / "tmp"
+        tmpdir.mkdir()
+        cookie = tmp_path / "cookies.txt"
+        cookie.write_text("cookie\n")
+
+        run_remote(SINGLE_ITEM_SCRIPT, tmpdir, cookie, tmp_path / "staging", "https://fake/url")
+
+        first = ytdlp_calls()[0]
+        assert "--sub-format srt/ttml/vtt/best" in first
+        assert "srv3" not in first

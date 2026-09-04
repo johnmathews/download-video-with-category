@@ -4,6 +4,15 @@ These are deliberately kept as shell: they run where yt-dlp, rsync and the NFS m
 and they take their inputs as positional arguments (never interpolated), so the Python side
 only ever quotes. Remote stdout is reserved for video basenames / structured results; all
 progress goes to stderr.
+
+Subtitle flags (all three download scripts, keep them in step):
+  --sub-format "srt/ttml/vtt/best"  NOT srv3. `--sub-format` is a preference list, and
+      YouTube offers srv3 for every auto-translated track, so srv3 used to win — then
+      `--convert-subs srt` handed it to ffmpeg, which has no srv3 demuxer, and yt-dlp
+      exited 1. srt makes the conversion a no-op; ttml takes yt-dlp's own dfxp2srt path.
+  --sub-langs "en,en-orig,en-US,en-GB"  NOT "en.*". yt-dlp names auto-translations
+      "<target>-<source>", so the glob also matched en-en and en-de — extra tracks, each
+      costing a --sleep-subtitles pause, which is what produced HTTP 429.
 """
 
 # Stage-2 transfer script (NAS-local SSD swift -> HDD tank), shared by every mode.
@@ -45,12 +54,12 @@ yt-dlp \
   --embed-chapters \
   --embed-thumbnail \
   --convert-thumbnails jpg \
-  --sub-langs "en.*" \
+  --sub-langs "en,en-orig,en-US,en-GB" \
   --write-subs \
   --write-auto-subs \
   --embed-subs \
   --convert-subs srt \
-  --sub-format "srv3/ttml/vtt/best" \
+  --sub-format "srt/ttml/vtt/best" \
   --sleep-subtitles 1 \
   -f bestvideo+bestaudio \
   --merge-output-format mkv \
@@ -132,12 +141,12 @@ yt-dlp \
   --embed-chapters \
   --embed-thumbnail \
   --convert-thumbnails jpg \
-  --sub-langs "en.*" \
+  --sub-langs "en,en-orig,en-US,en-GB" \
   --write-subs \
   --write-auto-subs \
   --embed-subs \
   --convert-subs srt \
-  --sub-format "srv3/ttml/vtt/best" \
+  --sub-format "srt/ttml/vtt/best" \
   --sleep-subtitles 1 \
   -f bestvideo+bestaudio \
   --merge-output-format mkv \
@@ -325,7 +334,7 @@ dl() {
     -o "$tmpdir/%(uploader)s-%(title)s-[%(id)s].%(ext)s" \
     "$url" >&2
 }
-dl --sub-langs "en.*" --write-subs --write-auto-subs --embed-subs --convert-subs srt --sub-format "srv3/ttml/vtt/best" --sleep-subtitles 1 || true
+dl --sub-langs "en,en-orig,en-US,en-GB" --write-subs --write-auto-subs --embed-subs --convert-subs srt --sub-format "srt/ttml/vtt/best" --sleep-subtitles 1 || true
 shopt -s nullglob
 video_files=("$tmpdir"/*.{mkv,mp4})
 if (( ${#video_files[@]} == 0 )); then

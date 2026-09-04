@@ -47,7 +47,7 @@ def media(fake_ssh: Any, cookies: Path, answers: Callable[[str], None]) -> Any:
 
     fake_ssh.when(mktemp)
     fake_ssh.on("playlist_title", stdout="Test Playlist\n")
-    fake_ssh.on("playlist_index", stdout="3\n")
+    fake_ssh.on("playlist_index", stdout="1\n2\n3\n")  # yt-dlp prints one index per entry
     fake_ssh.on("bash -s", host="media", stdout="001-fake-[id].mkv\n")
     answers("y\n")
     return fake_ssh
@@ -85,7 +85,7 @@ def test_n_aborts_before_downloading(media: Any, answers: Callable[[str], None])
 def test_all_items_skipped_is_success(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
     media.rules = [r for r in media.rules if r.__name__ == "mktemp"]
     media.on("playlist_title", stdout="Test Playlist\n")
-    media.on("playlist_index", stdout="3\n")
+    media.on("playlist_index", stdout="1\n2\n3\n")
     media.on("bash -s", host="media", stdout="")
     assert download_playlist(URL) == 0
     assert "downloaded 0, skipped 3, failed 0" in capsys.readouterr().err
@@ -104,7 +104,7 @@ def test_nas_failure_counts_failed_and_processes_all(media: Any, capsys: pytest.
 def test_ytdlp_failure_is_failed_not_skipped(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
     media.rules = [r for r in media.rules if r.__name__ == "mktemp"]
     media.on("playlist_title", stdout="Test Playlist\n")
-    media.on("playlist_index", stdout="3\n")
+    media.on("playlist_index", stdout="1\n2\n3\n")
     media.on("bash -s", host="media", rc=3)
     assert download_playlist(URL) == 1
     err = capsys.readouterr().err
@@ -117,7 +117,7 @@ def test_ytdlp_failure_is_failed_not_skipped(media: Any, capsys: pytest.CaptureF
 def test_empty_playlist(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
     media.rules = [r for r in media.rules if r.__name__ == "mktemp"]
     media.on("playlist_title", stdout="Empty\n")
-    media.on("playlist_index", stdout="0\n")
+    media.on("playlist_index", stdout="")  # yt-dlp prints nothing for a playlist with no entries
     with pytest.raises(Failure):
         download_playlist(URL)
     assert "Playlist is empty" in capsys.readouterr().err
@@ -232,3 +232,44 @@ def test_item_script_archived_skip_removes_its_own_staging_dir(run_remote: Runne
     assert result.stdout == ""
     assert not staging.exists(), "archived skip left its staging dir behind"
     assert not idir.exists(), "archived skip left its tmp dir behind"
+
+
+class TestPlaylistCount:
+    """`yt-dlp … | wc -l` reports wc's exit status, which is always 0. A listing that
+    died at item 50 of 200 was indistinguishable from a 200-item playlist that really
+    had 50 entries: yt downloaded 50, printed "downloaded 50, skipped 0, failed 0" and
+    exited 0. The count==0 guard never fired, so nothing said anything was wrong."""
+
+    def test_the_count_command_is_not_piped(self, media: Any) -> None:
+        """A pipe would discard yt-dlp's exit code again. Pinning the shape, because the
+        defect is invisible in the output — it only shows as a too-short playlist."""
+        download_playlist(URL)
+        command = next(c for c in media.commands() if "playlist_index" in c)
+        assert "|" not in command, f"exit code discarded by a pipe: {command}"
+
+    def test_a_failed_listing_aborts_instead_of_downloading_a_prefix(
+        self, media: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        media.rules.insert(0, lambda c: (1, "1\n2\n") if "playlist_index" in c.command else None)
+
+        with pytest.raises(Failure):
+            download_playlist(URL)
+
+        err = capsys.readouterr().err
+        assert "Could not read the playlist" in err
+        assert media.count("bash -s", host="media") == 0, "must not download a partial playlist"
+
+    def test_an_empty_playlist_says_empty_not_unreadable(self, media: Any, capsys: pytest.CaptureFixture[str]) -> None:
+        media.rules.insert(0, lambda c: (0, "") if "playlist_index" in c.command else None)
+
+        with pytest.raises(Failure):
+            download_playlist(URL)
+
+        err = capsys.readouterr().err
+        assert "empty" in err.lower()
+        assert "Could not read" not in err
+
+    def test_counts_the_printed_index_lines(self, media: Any, capsys: pytest.CaptureFixture[str]) -> None:
+        media.rules.insert(0, lambda c: (0, "1\n2\n3\n4\n5\n") if "playlist_index" in c.command else None)
+        assert download_playlist(URL) == 0
+        assert "downloaded 5" in capsys.readouterr().err

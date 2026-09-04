@@ -26,14 +26,22 @@ def _playlist_title(cookie: str, url: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def _playlist_count(cookie: str, url: str) -> int:
+def _playlist_count(cookie: str, url: str) -> int | None:
+    """How many entries the playlist has, or None if yt-dlp could not list it.
+
+    Counted here rather than with `| wc -l` on the remote: a pipeline's exit status is
+    the *last* command's, so wc's 0 masked every yt-dlp failure. A listing that died
+    halfway then looked exactly like a shorter playlist, and yt downloaded the prefix
+    and reported success. stderr is left alone so the real error reaches the terminal.
+    """
     result = ssh(
         MEDIA_HOST,
         "yt-dlp --remote-components ejs:github --flat-playlist --print '%(playlist_index)s' "
-        f"--cookies {q(cookie)} {q(url)} 2>/dev/null | wc -l",
+        f"--cookies {q(cookie)} {q(url)}",
     )
-    text = result.stdout.strip()
-    return int(text) if text.isdigit() else 0
+    if result.returncode != 0:
+        return None
+    return len([line for line in result.stdout.splitlines() if line.strip()])
 
 
 def _confirm_slug(suggested: str) -> str | None:
@@ -78,8 +86,15 @@ def download_playlist(url: str) -> int:
             raise Failure()
 
         count = _playlist_count(cookie, url)
+        if count is None:
+            info("❌ Could not read the playlist — yt-dlp failed to list its entries")
+            info("   Nothing was downloaded. A partial listing would have downloaded a")
+            info("   prefix of the playlist and reported success, so this stops instead.")
+            info("   Check the URL, and refresh cookies if the playlist is private.")
+            cookie_session.cleanup(staging=False)
+            raise Failure()
         if count == 0:
-            info("❌ Playlist is empty or could not be read")
+            info("❌ Playlist is empty")
             cookie_session.cleanup(staging=False)
             raise Failure()
 

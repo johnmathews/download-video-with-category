@@ -57,6 +57,22 @@ def run_script(host: str, script: str, *args: str | int, capture: bool = True) -
     return ssh(host, command, stdin=script, capture=capture)
 
 
+def id_glob(video_id: str) -> str:
+    """A `find -name` pattern matching "[<video_id>]" anywhere in a basename.
+
+    Two levels of escaping, both needed. The brackets around the id are escaped so
+    find reads them as literal brackets rather than a character class, and any glob
+    metacharacter *inside* the id is escaped so a strange id cannot widen the match.
+    The caller still passes the result through `q()` — this handles find's globbing,
+    `q` handles the shell.
+
+    The id is extractor-controlled metadata (yt-dlp's `--print '%(id)s'`), not a
+    value yt chose, so it is untrusted input like any other.
+    """
+    escaped = "".join("\\" + ch if ch in "\\[]*?" else ch for ch in video_id)
+    return f"*\\[{escaped}\\]*"
+
+
 def remove_remote(host: str, *paths: str) -> None:
     """Best-effort `rm -rf` of remote paths (cleanup; failures are ignored)."""
     if not paths:

@@ -8,7 +8,7 @@ from yt.config import MEDIA_HOST, NAS_FINAL_BASE, REMOTE_FINAL_BASE, SUPPORTED_S
 from yt.cookies import check_cookies, check_ytdlp_installed
 from yt.remote_scripts import SINGLE_ITEM_SCRIPT
 from yt.session import Session
-from yt.ssh import q, run_script, ssh
+from yt.ssh import id_glob, q, run_script, ssh
 from yt.ui import Failure, emit, format_size, info
 
 _SUPPORTED_URL_RE = re.compile(r"^https?://(www\.)?(" + "|".join(re.escape(s) for s in SUPPORTED_SITES) + ")")
@@ -50,7 +50,7 @@ def _height(quality: str) -> int | None:
 
 def find_existing(final_dir: str, video_id: str) -> str:
     """Path of an already-downloaded file carrying [video_id] in its name, or ''."""
-    result = ssh(MEDIA_HOST, f"find {q(final_dir)} -type f -name '*\\[{video_id}\\]*' 2>/dev/null | head -1")
+    result = ssh(MEDIA_HOST, f"find {q(final_dir)} -type f -name {q(id_glob(video_id))} 2>/dev/null | head -1")
     return result.stdout.strip() if result.returncode == 0 else ""
 
 

@@ -22,7 +22,7 @@ from yt.config import (
 from yt.cookies import check_cookies, check_ytdlp_installed
 from yt.remote_scripts import FITNESS_ITEM_SCRIPT, FITNESS_LIST_SCRIPT, FITNESS_RESOLVE_SCRIPT
 from yt.session import Session
-from yt.ssh import q, run_script, ssh
+from yt.ssh import id_glob, q, run_script, ssh
 from yt.ui import Failure, emit, info, interactive, prompt
 
 ORDERS = ("feed", "course")
@@ -225,7 +225,7 @@ def _fetch_info(cookie: str, url: str) -> tuple[str, str, str]:
 def _find_in_show(show_dir: str, video_id: str) -> str:
     result = ssh(
         MEDIA_HOST,
-        f"find {q(show_dir)} -type f \\( -name '*.mkv' -o -name '*.mp4' \\) -name '*\\[{video_id}\\]*' "
+        f"find {q(show_dir)} -type f \\( -name '*.mkv' -o -name '*.mp4' \\) -name {q(id_glob(video_id))} "
         "2>/dev/null | head -1",
     )
     return result.stdout.strip() if result.returncode == 0 else ""

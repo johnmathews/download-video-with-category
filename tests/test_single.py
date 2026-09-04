@@ -57,6 +57,64 @@ def test_duplicate_with_equal_quality_is_skipped_and_path_still_emitted(
     assert find == f"find {FINAL} -type f -name '*\\[abcDEF12345\\]*' 2>/dev/null | head -1"
 
 
+def test_unknown_new_quality_refuses_to_claim_the_existing_file_is_better(
+    fake_ssh: Any, cookies: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """yt-dlp prints 'NA' for height on some formats, giving new_quality='NAp'.
+
+    _height() mapped that to 0, and `0 <= anything` made the skip branch always win —
+    so yt reported "existing file has equal or better quality", emitted the old path
+    and exited 0, having compared against a height it never learned.
+    """
+    fake_ssh.on("mktemp -d", stdout="/tmp/yt.stub42\n")
+    fake_ssh.on("--print '%(id)s'", stdout="abcDEF12345\nSome Video\nNAp\n2200000000\n")
+    fake_ssh.on("find ", stdout=f"{FINAL}/old-[abcDEF12345].mkv\n")
+    fake_ssh.on("ffprobe", stdout="1080\n")
+    fake_ssh.on("bash -s", host="media", stdout="Uploader-Some_Video-[abcDEF12345].mkv\n")
+
+    with pytest.raises(Failure):
+        download_single("training", URL)
+
+    out, err = capsys.readouterr()
+    assert out == "", "must not emit a path it cannot vouch for"
+    assert "Could not determine the new video's quality" in err
+    assert "Skipping download - existing file has equal or better quality" not in err
+
+
+def test_unknown_existing_quality_also_refuses_to_guess(
+    fake_ssh: Any, cookies: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The mirror case: ffprobe failed, so existing_quality() is '0p'."""
+    fake_ssh.on("mktemp -d", stdout="/tmp/yt.stub42\n")
+    fake_ssh.on("--print '%(id)s'", stdout="abcDEF12345\nSome Video\n1080p\n2200000000\n")
+    fake_ssh.on("find ", stdout=f"{FINAL}/old-[abcDEF12345].mkv\n")
+    fake_ssh.on("ffprobe", rc=1)
+    fake_ssh.on("bash -s", host="media", stdout="x.mkv\n")
+
+    with pytest.raises(Failure):
+        download_single("training", URL)
+
+    assert "Could not determine the existing file's quality" in capsys.readouterr().err
+
+
+def test_failed_info_fetch_still_downloads_when_nothing_matches(
+    fake_ssh: Any, cookies: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression guard on the fix's blast radius.
+
+    When the whole --print call fails, video_id is 'unknown', so the find matches
+    nothing and there is no comparison to refuse — the download must still proceed.
+    """
+    fake_ssh.on("mktemp -d", stdout="/tmp/yt.stub42\n")
+    fake_ssh.on("--print '%(id)s'", rc=1)
+    fake_ssh.on("find ", stdout="")
+    fake_ssh.on("bash -s", host="media", stdout="Uploader-Some_Video-[abcDEF12345].mkv\n")
+
+    assert download_single("training", URL) == 0
+    assert fake_ssh.count("bash -s", host="media") == 1
+    assert "Could not fetch video info" in capsys.readouterr().err
+
+
 def test_duplicate_with_worse_quality_is_replaced(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
     media.on("find ", stdout=f"{FINAL}/old-[abcDEF12345].mkv\n")
     media.on("ffprobe", stdout="720\n")

@@ -1,4 +1,4 @@
-"""Single-video mode: `yt -g URL` — download one video into a category directory."""
+"""Single-video mode: `yt -y URL` — download one video into a category directory."""
 
 from __future__ import annotations
 

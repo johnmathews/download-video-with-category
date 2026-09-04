@@ -6,10 +6,13 @@ import argparse
 import sys
 
 from yt import fitness, playlist, single
-from yt.config import CATEGORIES, MEDIA_HOST, VALID_CATEGORIES
+from yt.config import CATEGORIES, MEDIA_HOST, REMOTE_FINAL_BASE, VALID_CATEGORIES
 from yt.remote_scripts import UPDATE_COMMAND
 from yt.ssh import ssh
 from yt.ui import Failure, info
+
+# Retired 2026-09-04, superseded by fitness mode (`yt -f`). Still intercepted in run().
+RETIRED_CATEGORY = "training"
 
 HELP = """\
 yt - Download videos to media VM with categorization
@@ -55,10 +58,15 @@ OPTIONS:
   --update               Update yt-dlp on the media VM (official standalone binary)
   --help                 Show this help message (also: yt help)
 
+WHICH MODE?
+  One video, filed by topic .............. yt -SHORTCUT URL
+  A whole playlist as its own library .... yt -p URL
+  A gym / workout video for Jellyfin ..... yt -f URL
+
 EXAMPLES:
-  yt -g "https://youtu.be/C4TVr2NtEg8"
+  yt -y "https://youtu.be/C4TVr2NtEg8"
   yt -m "https://youtube.com/watch?v=dQw4w9WgXcQ"
-  yt --category training "https://youtu.be/C4TVr2NtEg8"
+  yt --category music "https://youtube.com/watch?v=dQw4w9WgXcQ"
 
   Download a playlist as its own Jellyfin library:
     yt -p "https://www.youtube.com/playlist?list=PLxxxxxxxx"
@@ -76,7 +84,7 @@ EXAMPLES:
     yt --update
 
   Pipe to epm for photo extraction:
-    yt -g "https://youtu.be/C4TVr2NtEg8" | epm
+    yt -y "https://youtu.be/C4TVr2NtEg8" | epm
 
 REQUIREMENTS:
   - YouTube cookies must be exported to: ~/.config/yt-dlp/cookies/cookies.txt (override: LOCAL_YT_COOKIES)
@@ -85,6 +93,7 @@ REQUIREMENTS:
 
 FILES:
   Final videos are saved to: /mnt/nfs/movies/youtube/{{CATEGORY}}/
+  Legacy (not written to):   /mnt/nfs/movies/youtube/training/  — see 'yt -f' 
   Playlists are saved to:    /mnt/nfs/movies/youtube/{{PLAYLIST-SLUG}}/
   Fitness episodes go to:    /mnt/nfs/movies/youtube/fitness/{{SHOW}}/Season NN/
   Set JELLYFIN_URL + JELLYFIN_API_KEY to trigger a Jellyfin scan after -f.
@@ -109,6 +118,9 @@ def build_parser() -> _Parser:
     for flag in CATEGORIES:
         parser.add_argument(f"-{flag}", action="store_true", dest=f"cat_{flag}")
     parser.add_argument("--category")
+    # Retired, but still parsed: -g is in muscle memory, and argparse's
+    # "unrecognized arguments" would not tell anyone to use -f instead.
+    parser.add_argument("-g", action="store_true", dest="retired_training")
     parser.add_argument("-p", "--playlist", action="store_true")
     parser.add_argument("-f", "--fitness", action="store_true")
     parser.add_argument("--season-order", action="store_true")
@@ -123,6 +135,19 @@ def _selected_category(args: argparse.Namespace) -> str | None:
         if getattr(args, f"cat_{flag}"):
             return name
     return args.category or None
+
+
+def _retired_category_error() -> None:
+    """`-g` / `--category training` — superseded by `yt -f` (fitness mode)."""
+    info(f"❌ -g / {RETIRED_CATEGORY} is retired.")
+    info()
+    info('   Gym and workout videos now go to the Jellyfin "Health & Fitness" library:')
+    info("     yt -f <url>                       # asks which show and season")
+    info('     yt -f "<Show>/<Season>" <url>     # no questions')
+    info()
+    info(f"   Existing files in {REMOTE_FINAL_BASE}/{RETIRED_CATEGORY}/ are untouched.")
+    info("   That directory is legacy: nothing writes to it any more.")
+    raise Failure()
 
 
 def _usage_error(*lines: str) -> None:
@@ -143,6 +168,9 @@ def run(argv: list[str]) -> int:
         return 0
     positional: list[str] = args.positional
     category = _selected_category(args)
+
+    if args.retired_training or args.category == RETIRED_CATEGORY:
+        _retired_category_error()
 
     if args.update:
         info("🔄 Updating yt-dlp on media VM (official standalone binary -> /usr/local/bin)...")

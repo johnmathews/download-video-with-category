@@ -22,8 +22,9 @@ FITNESS_SUBDIR = "fitness"
 COOKIE_MAX_AGE_DAYS = 7
 
 # Shortcut flag -> (category name, description). Order is the order shown in --help.
+# "g"/training was retired on 2026-09-04: `yt -f` files gym and workout videos as
+# Jellyfin Health & Fitness episodes instead. cli.py still intercepts -g to say so.
 CATEGORIES: dict[str, tuple[str, str]] = {
-    "g": ("training", "Training and gym/workout videos"),
     "y": ("youtube", "General YouTube content"),
     "c": ("create", "Creative/maker content"),
     "m": ("music", "Music videos and performances"),

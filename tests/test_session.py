@@ -52,9 +52,9 @@ def test_other_exceptions_propagate_without_cleanup(fake_ssh) -> None:
 def test_nas_transfer_runs_shared_script(fake_ssh) -> None:
     fake_ssh.on("mktemp -d", stdout="/tmp/yt.x\n")
     s = Session().open()
-    assert s.nas_transfer("/mnt/tank/movies/youtube/training")
+    assert s.nas_transfer("/mnt/tank/movies/youtube/music")
     call = fake_ssh.calls[-1]
     assert call.host == "nas"
-    assert call.command == "bash -s -- /mnt/swift/downloads/yt-staging/yt.x /mnt/tank/movies/youtube/training"
+    assert call.command == "bash -s -- /mnt/swift/downloads/yt-staging/yt.x /mnt/tank/movies/youtube/music"
     assert call.stdin is not None
     assert "rsync -rl --info=progress2 --remove-source-files" in call.stdin

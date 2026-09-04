@@ -12,8 +12,13 @@ directories on the NFS-mounted movies dataset.
 5. SSHs to the NAS for a local copy from SSD to HDD (`tank` pool) via rsync (~1.6 GB/s)
 6. Cleans up temp and staging dirs
 
-Duplicate detection compares video quality via ffprobe and skips downloads when the existing file is equal or better
-quality. See [docs/architecture.md](docs/architecture.md) for the two-stage transfer and the code layout.
+Duplicate detection differs by mode: single-video mode compares quality via ffprobe and skips when the existing file
+is equal or better (and refuses to guess when either quality is unknown); playlist mode uses yt-dlp's
+`--download-archive`, and fitness mode matches the YouTube id anywhere in the show. Only single-video mode compares
+quality, so a playlist re-run will not upgrade a 480p item to 1080p.
+
+See [docs/architecture.md](docs/architecture.md) for the two-stage transfer and the code layout, and
+[journal/](journal/) for why particular decisions were made.
 
 ## Setup
 
@@ -29,11 +34,25 @@ Requirements:
   extension); override the location with `LOCAL_YT_COOKIES`
 - yt-dlp and ffprobe on the media VM (`yt --update` installs/refreshes yt-dlp)
 
+## Which mode do I use?
+
+| You have | Use | Where it lands |
+| --- | --- | --- |
+| One video to file by topic | `yt -SHORTCUT URL` | `youtube/<category>/` — add as a Jellyfin **movie** library |
+| A whole playlist | `yt -p URL` | `youtube/<playlist-slug>/` — its own Jellyfin **movie** library |
+| A gym / workout / mobility video | `yt -f URL` | `youtube/fitness/<Show>/Season NN/` — an episode in the Jellyfin **Health & Fitness** Shows library, with `.nfo` and thumbnail |
+
+`yt -f` is the one to reach for with training content: it gets a proper episode entry rather than a loose file.
+
+> **Retired:** `-g` / `--category training` was removed on 2026-09-04 — `yt -f` replaced it. Running it prints a
+> pointer to `yt -f`. Files already in `/mnt/nfs/movies/youtube/training/` are left exactly where they are; that
+> directory is legacy and nothing writes to it any more. Move them into a fitness show by hand if you want them
+> in the Shows library.
+
 ## Categories
 
 ```
 Flag  Name              Description
--g    training          Training and gym/workout videos
 -y    youtube           General YouTube content
 -c    create            Creative/maker content
 -m    music             Music videos and performances
@@ -44,12 +63,15 @@ Flag  Name              Description
 
 Note: `-h` is the shortcut for "humanity", not help. Use `yt --help` for help.
 
+Each category is a plain directory of video files under `/mnt/nfs/movies/youtube/`. Add the ones you want to see in
+Jellyfin as **movie** libraries — unlike `yt -f`, nothing writes `.nfo` sidecars or triggers a library scan for them.
+
 ## Usage
 
 ```
-yt -g "https://youtu.be/C4TVr2NtEg8"
+yt -y "https://youtu.be/C4TVr2NtEg8"
 yt -m "https://youtube.com/watch?v=dQw4w9WgXcQ"
-yt --category training "https://youtu.be/C4TVr2NtEg8"
+yt --category music "https://youtube.com/watch?v=dQw4w9WgXcQ"
 yt --update
 yt --help          # or: yt help
 ```
@@ -60,7 +82,7 @@ Only the final file path is emitted to stdout (all progress and status output go
 pipelines:
 
 ```
-yt -g "https://youtu.be/C4TVr2NtEg8" | epm
+yt -y "https://youtu.be/C4TVr2NtEg8" | epm
 ```
 
 The path is emitted whether the video was freshly downloaded or skipped as a duplicate.
@@ -164,6 +186,10 @@ periodically sync a growing playlist.
 Each video is fully transferred to the NAS HDD before the next one begins.
 
 ## Development
+
+Dated notes on why things are the way they are live in [journal/](journal/) — the feed-vs-course
+season numbering, the zsh→Python port, and the 2026-09-04 pass that retired `-g`.
+
 
 ```sh
 uv sync

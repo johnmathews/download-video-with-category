@@ -7,7 +7,7 @@ directories on the NFS-mounted movies dataset.
 
 1. Copies browser cookies from your Mac to the media VM over SSH
 2. Runs yt-dlp on the media VM to download the video to `/tmp` (local disk)
-3. Embeds metadata, chapters, thumbnails, and subtitles
+3. Embeds metadata, chapters, thumbnails, and English subtitles
 4. Stages the finished file to SSD NFS (`swift` pool) via rsync (~552 MB/s)
 5. SSHs to the NAS for a local copy from SSD to HDD (`tank` pool) via rsync (~1.6 GB/s)
 6. Cleans up temp and staging dirs
@@ -193,14 +193,15 @@ season numbering, the zsh→Python port, and the 2026-09-04 pass that retired `-
 
 ```sh
 uv sync
-uv run python -m pytest --cov=yt   # 133 tests, no SSH needed (ssh is faked in tests/conftest.py)
+uv run python -m pytest --cov=yt   # 203 tests, no SSH needed (ssh is faked in tests/conftest.py)
 uv run ruff check . && uv run ruff format --check .
 uv run pyright
 ```
 
-The same checks run in GitHub Actions on every push. `YT_SSH` swaps the ssh binary (for wrappers or
-manual stubbing), `YT_NFO_HELPER` points at an alternative nfo helper, and
-`YT_FITNESS_ANSWERS_FROM_STDIN=1` lets the interactive prompts read answers from a pipe.
+The same checks run in GitHub Actions on every push. The tests that run the remote bash scripts for real need
+bash >= 4 and GNU rsync, and skip without them (macOS ships bash 3.2 and openrsync: `brew install bash rsync`).
+`YT_SSH` swaps the ssh binary (for wrappers or manual stubbing), `YT_NFO_HELPER` points at an alternative nfo
+helper, and `YT_FITNESS_ANSWERS_FROM_STDIN=1` lets the interactive prompts read answers from a pipe.
 The original zsh-era playlist design and plan are kept in [docs/archive/](docs/archive/).
 
 `yt` used to be a zsh function sourced from `~/.zshrc`; that file is gone, so a leftover

@@ -162,6 +162,14 @@ class TestRetiredTrainingCategory:
         assert "retired" in err
         assert "yt -f" in err
 
+    def test_does_not_pre_empt_update(self) -> None:
+        """`yt --update -g` should still update yt-dlp: the retirement notice is about
+        a category, and --update takes no category."""
+        with patch.object(cli, "ssh") as ssh_mock:
+            ssh_mock.return_value.returncode = 0
+            assert run(["--update", "-g"]) == 0
+        assert ssh_mock.called, "the retirement check swallowed --update"
+
     def test_says_the_old_directory_is_left_alone(self, capsys: pytest.CaptureFixture[str]) -> None:
         _run(["-g", "https://youtu.be/x"])
         assert "youtube/training/" in capsys.readouterr().err

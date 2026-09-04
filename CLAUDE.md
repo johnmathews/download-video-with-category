@@ -49,6 +49,10 @@ stdin. `answers("y\n")` feeds prompt input; it also sets `YT_FITNESS_ANSWERS_FRO
 is true without a tty. When patching mode functions from CLI tests, patch `yt.single.download_single` etc. —
 `cli.py` imports the modules, not the names, precisely so those patches take effect.
 
+The bash in `yt/remote_scripts.py` is additionally run for real: the `run_remote` fixture pipes a script to
+`bash -s -- args…` against a temp tree with the real `rsync` and a fake `yt-dlp` (`fake_bin`, driven by
+`FAKE_YTDLP_*`). Those tests are marked `@requires_remote_tools` and skip without bash >= 4 and GNU rsync.
+
 ## Journal
 
 `journal/yymmdd-name.md` — decisions and gotchas per change. `journal/260825-python-port.md` records the port.

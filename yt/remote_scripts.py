@@ -186,6 +186,10 @@ if (( ${#video_files[@]} == 0 )); then
   # genuine download failure that must not be silently counted as skipped.
   rmdir "$tmpdir" 2>/dev/null || rm -rf "$tmpdir"
   if (( rc == 0 )); then
+    # Archived skip: nothing was staged, so drop the staging dir this script created.
+    # Doing it here rather than from Python saves an ssh round trip per skipped item —
+    # a re-run of a fully archived playlist is otherwise one connection per item.
+    rmdir "$staging_dir" 2>/dev/null || true
     exit 0   # archived skip — emit nothing
   else
     exit 3   # genuine download failure — emit nothing
@@ -234,7 +238,7 @@ exit 0
 #              "4:Mobility" (create Season 04 titled Mobility; creates the show too)
 # order: feed = newest first, episodes numbered DOWN from 999; course = oldest first, 1..N.
 # stdout (6 lines): <show dir> <season dir> <next episode number> <episode digits> <order> <order-was-missing 0|1>
-# exit 4 = season/show not found and no ":Name" given to create it.
+# exit 4 = unsafe show name, or season/show not found and no ":Name" given to create it.
 FITNESS_RESOLVE_SCRIPT = r"""
 set -euo pipefail
 base="$1"; show="$2"; spec="$3"; set_order="${4:-}"

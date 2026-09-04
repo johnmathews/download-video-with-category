@@ -188,21 +188,6 @@ class TestStagingLifecycle:
     removed otherwise. Both directions need pinning — a refactor that tidies up
     the keep-paths destroys a fully downloaded episode."""
 
-    def test_archived_skips_do_not_leak_staging_dirs(self, media: Any, capsys: pytest.CaptureFixture[str]) -> None:
-        """Re-running a fully archived playlist is the normal way to top one up.
-        Every per-item staging dir it creates must be removed again."""
-        media.on("bash -s", host="media", stdout="")  # no basenames = archived skip
-        media.rules.insert(0, media.rules.pop())
-
-        assert download_playlist(URL) == 0
-        assert "skipped 3" in capsys.readouterr().err
-
-        removed = " ".join(c for c in media.commands() if c.startswith("rm -rf"))
-        for n in (2, 3, 4):  # stub1 is the cookie session; items are 2..4
-            assert f"/mnt/nfs/downloads/yt-staging/yt.stub{n}" in removed, (
-                f"item {n} leaked its staging dir; rm -rf calls were: {removed}"
-            )
-
     def test_nas_failure_keeps_every_staged_item_for_recovery(
         self, media: Any, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -218,3 +203,32 @@ class TestStagingLifecycle:
                 "staging must survive a NAS failure so the files can be recovered by hand"
             )
         assert "files remain on SSD" in err
+
+
+@requires_remote_tools
+def test_item_script_archived_skip_removes_its_own_staging_dir(run_remote: Runner, tmp_path: Path) -> None:
+    """The script mkdir -p's the staging dir before it knows the item is archived.
+    Re-running a fully archived playlist is the normal way to top one up, so a dir
+    left behind per item accumulates forever — and destroys the signal that anything
+    still in yt-staging needs manual recovery."""
+    idir = tmp_path / "item"
+    idir.mkdir()
+    cookie = tmp_path / "cookies.txt"
+    cookie.write_text("fake\n")
+    staging = tmp_path / "staging"
+
+    result = run_remote(
+        PLAYLIST_ITEM_SCRIPT,
+        idir,
+        cookie,
+        staging,
+        "https://fake/url",
+        "1",
+        tmp_path / "archive.txt",
+        FAKE_YTDLP_MODE="skip",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert not staging.exists(), "archived skip left its staging dir behind"
+    assert not idir.exists(), "archived skip left its tmp dir behind"

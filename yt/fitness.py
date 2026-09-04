@@ -199,9 +199,13 @@ def safe_show_name(name: str) -> str:
 
 
 def split_target(target: str) -> tuple[str, str, str]:
-    """'Show/spec[:feed|course]' → (show, spec, order-or-''). Validates the show."""
+    """'Show/spec[:feed|course]' → (show, spec, order-or-'').
+
+    Deliberately does not validate: it is also used on targets built from the remote
+    listing, where the show name is an existing directory rather than user input.
+    Call `safe_show_name()` at the points where a user supplies the name.
+    """
     show, spec = target.split("/", 1)
-    show = safe_show_name(show)
     order = ""
     for candidate in ORDERS:
         if spec.endswith(":" + candidate):
@@ -262,7 +266,9 @@ def add_to_show(target: str, url: str) -> int:
     check_ytdlp_installed()
     fitness_base = f"{REMOTE_FINAL_BASE}/{FITNESS_SUBDIR}"
     if target:
-        split_target(target)  # reject an unusable show before opening a remote session
+        # Reject an unusable show name before opening a remote session, so nothing
+        # has been uploaded when it fails.
+        safe_show_name(split_target(target)[0])
 
     with Session().open() as session:
         session.upload_cookie(cookies)
@@ -399,7 +405,9 @@ def season_order(target: str, order: str) -> int:
         info("❌ order must be feed or course")
         raise Failure()
     fitness_base = f"{REMOTE_FINAL_BASE}/{FITNESS_SUBDIR}"
-    show, spec, _ = split_target(target)
+    show, spec, inline_order = split_target(target)
+    safe_show_name(show)
+    order = order or inline_order
     resolved = resolve(fitness_base, show, spec, order)
     if resolved is None:
         info(f"❌ Could not resolve {target}")

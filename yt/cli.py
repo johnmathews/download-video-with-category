@@ -93,7 +93,7 @@ REQUIREMENTS:
 
 FILES:
   Final videos are saved to: /mnt/nfs/movies/youtube/{{CATEGORY}}/
-  Legacy (not written to):   /mnt/nfs/movies/youtube/training/  — see 'yt -f' 
+  Legacy (not written to):   /mnt/nfs/movies/youtube/training/  — see 'yt -f'
   Playlists are saved to:    /mnt/nfs/movies/youtube/{{PLAYLIST-SLUG}}/
   Fitness episodes go to:    /mnt/nfs/movies/youtube/fitness/{{SHOW}}/Season NN/
   Set JELLYFIN_URL + JELLYFIN_API_KEY to trigger a Jellyfin scan after -f.
@@ -169,12 +169,14 @@ def run(argv: list[str]) -> int:
     positional: list[str] = args.positional
     category = _selected_category(args)
 
-    if args.retired_training or args.category == RETIRED_CATEGORY:
-        _retired_category_error()
-
     if args.update:
         info("🔄 Updating yt-dlp on media VM (official standalone binary -> /usr/local/bin)...")
         return ssh(MEDIA_HOST, UPDATE_COMMAND, capture=False, tty=True).returncode
+
+    # After --update (so `yt --update -g` still updates) but before any dispatch
+    # that would act on a category.
+    if args.retired_training or args.category == RETIRED_CATEGORY:
+        _retired_category_error()
 
     if args.season_order:
         return fitness.season_order(positional[0] if positional else "", positional[1] if len(positional) > 1 else "")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -13,6 +12,10 @@ import pytest
 from yt.playlist import download_playlist, slugify
 from yt.remote_scripts import PLAYLIST_ITEM_SCRIPT
 from yt.ui import Failure
+
+from .conftest import requires_remote_tools
+
+Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 URL = "https://www.youtube.com/playlist?list=PLtest"
 
@@ -130,78 +133,46 @@ def test_missing_cookie_file(
 
 
 # ---------------------------------------------------------------------------
-# The item script itself, run locally under bash with a fake yt-dlp and rsync.
+# The item script itself, run for real under bash (shared harness in conftest.py).
 # ---------------------------------------------------------------------------
 
-FAKE_YTDLP = """#!/usr/bin/env bash
-mode="${FAKE_YTDLP_MODE:-skip}"
-case "$mode" in
-  success) touch "${FAKE_TMPDIR:?}/001-fake-video-[abcd1234].mkv"; exit 0 ;;
-  skip) exit 0 ;;
-  fail) exit 1 ;;
-esac
-"""
-
-FAKE_RSYNC = """#!/usr/bin/env bash
-args=("$@"); dest="${args[-1]}"; mkdir -p "$dest"
-for arg in "${args[@]}"; do case "$arg" in -*) ;; *) [ -f "$arg" ] && mv "$arg" "$dest/" ;; esac; done
-exit 0
-"""
+VIDEO = "001-fake-video-[abcd1234].mkv"
 
 
-@pytest.fixture
-def fake_bin(tmp_path: Path) -> Path:
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    for name, body in (("yt-dlp", FAKE_YTDLP), ("rsync", FAKE_RSYNC)):
-        script = bindir / name
-        script.write_text(body)
-        script.chmod(0o755)
-    return bindir
-
-
-def _run_item_script(fake_bin: Path, tmp_path: Path, mode: str) -> subprocess.CompletedProcess[str]:
+def _run_item_script(run_remote: Runner, tmp_path: Path, **env: str) -> subprocess.CompletedProcess[str]:
     idir = tmp_path / "item"
-    staging = tmp_path / "staging"
     idir.mkdir()
-    staging.mkdir()
     cookie = tmp_path / "cookies.txt"
     cookie.write_text("fake\n")
-    env = {**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}", "FAKE_YTDLP_MODE": mode, "FAKE_TMPDIR": str(idir)}
-    return subprocess.run(
-        [
-            "bash",
-            "-s",
-            "--",
-            str(idir),
-            str(cookie),
-            str(staging),
-            "https://fake/url",
-            "1",
-            str(tmp_path / "archive.txt"),
-        ],
-        input=PLAYLIST_ITEM_SCRIPT,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
+    return run_remote(
+        PLAYLIST_ITEM_SCRIPT,
+        idir,
+        cookie,
+        tmp_path / "staging",
+        "https://fake/url",
+        "1",
+        tmp_path / "archive.txt",
+        **env,
     )
 
 
-def test_item_script_success_emits_basename(fake_bin: Path, tmp_path: Path) -> None:
-    result = _run_item_script(fake_bin, tmp_path, "success")
+@requires_remote_tools
+def test_item_script_success_emits_basename(run_remote: Runner, tmp_path: Path) -> None:
+    result = _run_item_script(run_remote, tmp_path, FAKE_YTDLP_FILES=VIDEO)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "001-fake-video-[abcd1234].mkv"
+    assert result.stdout.strip() == VIDEO
 
 
-def test_item_script_archived_skip(fake_bin: Path, tmp_path: Path) -> None:
-    result = _run_item_script(fake_bin, tmp_path, "skip")
+@requires_remote_tools
+def test_item_script_archived_skip(run_remote: Runner, tmp_path: Path) -> None:
+    result = _run_item_script(run_remote, tmp_path, FAKE_YTDLP_MODE="skip")
     assert result.returncode == 0
     assert result.stdout == ""
 
 
-def test_item_script_real_failure_exits_3(fake_bin: Path, tmp_path: Path) -> None:
-    result = _run_item_script(fake_bin, tmp_path, "fail")
+@requires_remote_tools
+def test_item_script_real_failure_exits_3(run_remote: Runner, tmp_path: Path) -> None:
+    result = _run_item_script(run_remote, tmp_path, FAKE_YTDLP_MODE="fail")
     assert result.returncode == 3
     assert result.stdout == ""
 

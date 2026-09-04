@@ -54,6 +54,16 @@ def find_existing(final_dir: str, video_id: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def _remove_superseded(path: str) -> bool:
+    """Delete the lower-quality file a completed download has replaced.
+
+    Deliberately `rm -f` on one quoted path, not `remove_remote()`'s `rm -rf … || true`:
+    this removes one of the user's videos, so it must not recurse and its failure must
+    be visible rather than swallowed.
+    """
+    return ssh(MEDIA_HOST, f"rm -f {q(path)}").returncode == 0
+
+
 def existing_quality(path: str) -> str:
     result = ssh(
         MEDIA_HOST,
@@ -95,6 +105,7 @@ def download_single(category: str, url: str) -> int:
         info()
 
         info(f"🔎 [{session.elapsed}] Checking for existing downloads...")
+        superseded = ""  # a lower-quality file this run has committed to replacing
         existing = find_existing(remote_final_dir, video_id)
         if existing:
             info(f"⚠️  Found existing file: {existing.rsplit('/', 1)[-1]}")
@@ -124,7 +135,8 @@ def download_single(category: str, url: str) -> int:
                 return 0
             info()
             info("✅ New quality is better - proceeding with download")
-            info("   Old file will be replaced")
+            info("   The old file will be removed once the new one has transferred")
+            superseded = existing
         else:
             info("✓ No existing download found")
         info()
@@ -154,6 +166,16 @@ def download_single(category: str, url: str) -> int:
             info(f"  ssh nas 'rsync -rl --remove-source-files {q(session.nas_staging_dir)}/ {q(nas_final_dir)}/'")
             info(f"  ssh nas 'rmdir {q(session.nas_staging_dir)}'")
             raise Failure()  # staging dir deliberately kept for manual recovery
+
+        # "Replaced" now means replaced. yt-dlp names the file from the *current*
+        # uploader and title, so an upgrade usually lands under a different name and
+        # rsync writes it alongside the old one rather than over it — leaving two files
+        # with the same [id], either of which the next run's find_existing() may match.
+        if superseded and superseded not in {f"{remote_final_dir}/{name}" for name in basenames}:
+            if _remove_superseded(superseded):
+                info(f"🗑️  Removed superseded file: {superseded.rsplit('/', 1)[-1]}")
+            else:
+                info(f"⚠️  Could not remove the superseded file — delete it by hand: {superseded}")
 
         info()
         info(f"✅ [{session.elapsed}] Successfully downloaded to: {remote_final_dir}")

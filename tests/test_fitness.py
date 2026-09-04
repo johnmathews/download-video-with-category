@@ -8,7 +8,16 @@ from typing import Any
 
 import pytest
 
-from yt.fitness import Resolved, add_to_show, ask_order, parse_listing, pick_target, season_order, split_target
+from yt.fitness import (
+    Resolved,
+    add_to_show,
+    ask_order,
+    parse_listing,
+    pick_target,
+    safe_show_name,
+    season_order,
+    split_target,
+)
 from yt.ui import Failure
 
 URL = "https://youtu.be/abcDEF12345"
@@ -349,3 +358,31 @@ class TestSeasonOrder:
     def test_requires_target(self, media: Any) -> None:
         with pytest.raises(Failure):
             season_order("Kettlebell", "")
+
+
+class TestShowNameValidation:
+    """The show is the only user-controlled path component: the season directory is
+    always "Season NN", so `..` in a show name is the whole traversal surface."""
+
+    @pytest.mark.parametrize("bad", ["..", ".", "../Escape", "-rf", "", "  "])
+    def test_rejects_unsafe_show_names_before_any_remote_call(
+        self, bad: str, fake_ssh: Any, cookies: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fake_ssh.on("mktemp -d", stdout="/tmp/yt.stub42\n")
+        with pytest.raises(Failure):
+            add_to_show(f"{bad}/1:X", URL)
+        assert "not a usable show name" in capsys.readouterr().err
+        assert fake_ssh.count("bash -s", host="media") == 0, "must reject before touching the media VM"
+
+    @pytest.mark.parametrize("good", ["Mobility & Physio", "Combat Sports", "Heavy Club", "Kettlebell"])
+    def test_accepts_the_show_names_the_library_actually_uses(self, good: str) -> None:
+        assert safe_show_name(good) == good
+
+    def test_strips_surrounding_whitespace(self) -> None:
+        assert safe_show_name("  Kettlebell  ") == "Kettlebell"
+
+    def test_season_order_rejects_unsafe_names_too(self, fake_ssh: Any, capsys: pytest.CaptureFixture[str]) -> None:
+        with pytest.raises(Failure):
+            season_order("../X/1", "feed")
+        assert "not a usable show name" in capsys.readouterr().err
+        assert fake_ssh.count("bash -s", host="media") == 0

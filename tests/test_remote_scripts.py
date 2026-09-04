@@ -243,6 +243,16 @@ class TestFitnessResolveScript:
         assert result.returncode == 4
         assert "No season" in result.stderr
 
+    @pytest.mark.parametrize("bad", ["..", ".", ".hidden"])
+    def test_refuses_a_show_name_that_escapes_the_base(self, bad: str, run_remote: Runner, fitness_base: Path) -> None:
+        """Defence in depth: the Python side validates too, but the script is also
+        reachable from season_order and any future caller."""
+        result = run_remote(FITNESS_RESOLVE_SCRIPT, fitness_base, bad, "1:Escaped", "")
+
+        assert result.returncode == 4, result.stdout
+        assert "unsafe show name" in result.stderr
+        assert not (fitness_base.parent / "Season 01").exists(), "created a dir outside the fitness tree"
+
     def test_bad_order_value_exits_5(self, run_remote: Runner, fitness_base: Path) -> None:
         _season(fitness_base / "Kettlebell", 1)
         result = run_remote(FITNESS_RESOLVE_SCRIPT, fitness_base, "Kettlebell", "1", "sideways")

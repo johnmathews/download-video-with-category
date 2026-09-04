@@ -113,7 +113,10 @@ def pick_target(listing: str) -> tuple[str, str | None]:
             answer = _ask("New show name: ")
             if not answer:
                 continue
-            picked_show, new_show = answer, True
+            try:
+                picked_show, new_show = safe_show_name(answer), True
+            except Failure:
+                continue
         elif answer.isdigit() and 1 <= int(answer) <= len(shows):
             picked_show = shows[int(answer) - 1]
         else:
@@ -177,9 +180,28 @@ def resolve(fitness_base: str, show: str, spec: str, set_order: str) -> Resolved
     )
 
 
+def safe_show_name(name: str) -> str:
+    """A show name that is safe to use as a directory name under the fitness tree.
+
+    The show is the *only* user-supplied path component — season directories are
+    always "Season NN" and episode names are built from the resolved numbers — so
+    this is the whole traversal surface. Real library names include
+    "Mobility & Physio" and "Combat Sports", so spaces, "&" and non-ASCII must all
+    survive; only path-significant forms are rejected.
+    """
+    cleaned = name.strip()
+    if not cleaned or "/" in cleaned or cleaned.startswith((".", "-")) or any(c in cleaned for c in "\0\n\r"):
+        info(f"❌ {name!r} is not a usable show name")
+        info("   A show becomes a directory in the fitness library:")
+        info("   no '/', no leading '.' or '-', and not empty.")
+        raise Failure()
+    return cleaned
+
+
 def split_target(target: str) -> tuple[str, str, str]:
-    """'Show/spec[:feed|course]' → (show, spec, order-or-'')."""
+    """'Show/spec[:feed|course]' → (show, spec, order-or-''). Validates the show."""
     show, spec = target.split("/", 1)
+    show = safe_show_name(show)
     order = ""
     for candidate in ORDERS:
         if spec.endswith(":" + candidate):
@@ -239,6 +261,8 @@ def add_to_show(target: str, url: str) -> int:
     cookies = check_cookies()
     check_ytdlp_installed()
     fitness_base = f"{REMOTE_FINAL_BASE}/{FITNESS_SUBDIR}"
+    if target:
+        split_target(target)  # reject an unusable show before opening a remote session
 
     with Session().open() as session:
         session.upload_cookie(cookies)
@@ -343,6 +367,12 @@ def add_to_show(target: str, url: str) -> int:
             raise Failure()
 
         # Stage 2: NAS-local SSD -> HDD into the season dir.
+        # str.removeprefix is a no-op when the prefix is absent, which would silently
+        # turn season_rel into an absolute path and send rsync somewhere unintended.
+        if not resolved.season_dir.startswith(fitness_base + "/"):
+            info(f"❌ Resolved season dir is outside {fitness_base}: {resolved.season_dir}")
+            info(f"   Files are on SSD staging: {session.staging_dir}")
+            raise Failure()
         season_rel = resolved.season_dir.removeprefix(fitness_base + "/")
         nas_season_dir = f"{NAS_FINAL_BASE}/{FITNESS_SUBDIR}/{season_rel}"
         info(f"📀 [{session.elapsed}] Transferring to HDD on NAS...")
@@ -369,7 +399,7 @@ def season_order(target: str, order: str) -> int:
         info("❌ order must be feed or course")
         raise Failure()
     fitness_base = f"{REMOTE_FINAL_BASE}/{FITNESS_SUBDIR}"
-    show, spec = target.split("/", 1)
+    show, spec, _ = split_target(target)
     resolved = resolve(fitness_base, show, spec, order)
     if resolved is None:
         info(f"❌ Could not resolve {target}")

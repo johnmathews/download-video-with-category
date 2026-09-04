@@ -238,6 +238,12 @@ exit 0
 FITNESS_RESOLVE_SCRIPT = r"""
 set -euo pipefail
 base="$1"; show="$2"; spec="$3"; set_order="${4:-}"
+# The show is the only user-supplied path component; season dirs are always
+# "Season NN". Reject anything that would escape $base or create a hidden dir.
+# The Python side validates too — this is defence in depth for any other caller.
+case "$show" in
+  ""|.*|*/*) echo "❌ unsafe show name: $show" >&2; exit 4 ;;
+esac
 show_dir="$base/$show"
 create_name=""
 case "$spec" in *:*) create_name="${spec#*:}"; spec="${spec%%:*}" ;; esac

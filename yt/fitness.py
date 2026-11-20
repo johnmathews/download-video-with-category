@@ -20,6 +20,7 @@ from yt.config import (
     nfo_helper_path,
 )
 from yt.cookies import check_cookies, check_ytdlp_installed
+from yt.destination import check_destinations
 from yt.remote_scripts import FITNESS_ITEM_SCRIPT, FITNESS_LIST_SCRIPT, FITNESS_RESOLVE_SCRIPT
 from yt.session import Session
 from yt.ssh import id_glob, q, run_script, ssh
@@ -269,6 +270,7 @@ def add_to_show(target: str, url: str) -> int:
         # Reject an unusable show name before opening a remote session, so nothing
         # has been uploaded when it fails.
         safe_show_name(split_target(target)[0])
+    check_destinations()
 
     with Session().open() as session:
         session.upload_cookie(cookies)

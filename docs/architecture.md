@@ -9,6 +9,8 @@ Mac (local)                   Media VM (SSH)                  NAS (SSH)
 ───────────                   ──────────────                  ─────────
 yt parses flags/URL           yt-dlp downloads video
   → validates cookies         /tmp/yt.XXXXXX (local disk)
+  → checks destination on
+    media VM + NAS
   → uploads cookies via SSH          │
   → fetches video info               ▼ rsync (~552 MB/s)
   → checks for duplicates    /mnt/nfs/downloads/yt-staging/   ← SSD (swift pool)
@@ -47,8 +49,9 @@ HDD NFS makes the mux slow; `mv` between NFS mounts from the media VM sends the 
 | `ssh.py` | The one place that spawns `ssh`. `ssh()` runs a command with `BatchMode=yes`; `run_script()` pipes a bash script to `bash -s -- args…` with every argument `shlex.quote`d; `q()` shell-quotes one value; `id_glob()` builds the `find -name` pattern for a `[<video id>]` match (escaping the brackets and any glob metacharacter in the id); `remove_remote()` is best-effort cleanup. Tests replace `_execute`. |
 | `remote_scripts.py` | The bash that runs *on* the media VM / NAS, as string constants: `NAS_SCRIPT`, `SINGLE_ITEM_SCRIPT`, `PLAYLIST_ITEM_SCRIPT`, `FITNESS_LIST_SCRIPT`, `FITNESS_RESOLVE_SCRIPT`, `FITNESS_ITEM_SCRIPT`, `UPDATE_COMMAND`. Kept as shell because yt-dlp, rsync and the mounts live there; they take positional arguments only. |
 | `cookies.py` | Cookie-file preflight (missing / empty / older than 7 days), the `yt-dlp` presence check on the media VM, and upload under `umask 077`. |
+| `destination.py` | `check_destinations()`, run by every download mode before anything is uploaded: the final base directory must be readable and writable from both the media VM (`REMOTE_FINAL_BASE`, over NFS) and the NAS (`NAS_FINAL_BASE`, written by stage 2). Each check runs under `timeout -s KILL 15`, because a hard NFS mount whose server is down blocks reads and only SIGKILL interrupts the wait. Prints the kernel's own reason (e.g. `Stale file handle`) and the unlock-then-remount hint. |
 | `session.py` | `Session`: `mktemp` on the media VM, the derived staging dirs, cookie upload, `nas_transfer()`, and cleanup. Used as a context manager: a `KeyboardInterrupt` inside the block removes the remote tmp and staging dirs and exits 130 (the zsh `trap`). |
-| `single.py` | `yt -y URL`: info fetch, duplicate check by `[id]` with ffprobe quality comparison, download, two-stage transfer. Refuses the comparison when either quality is unknown rather than assuming the existing file is better. On an upgrade the superseded file is `rm -f`'d after the NAS transfer succeeds, and only when the new filename differs from it — rsync overwrites in place when the name is unchanged. |
+| `single.py` | `yt -y URL`: info fetch, duplicate check by `[id]` with ffprobe quality comparison (a search that fails without a match stops the run rather than reading as "no existing download"), download, two-stage transfer. Refuses the comparison when either quality is unknown rather than assuming the existing file is better. On an upgrade the superseded file is `rm -f`'d after the NAS transfer succeeds, and only when the new filename differs from it — rsync overwrites in place when the name is unchanged. |
 | `playlist.py` | `yt -p URL`: slug confirmation, per-item loop with `--download-archive`, downloaded/skipped/failed accounting. The entry count is taken from yt-dlp's exit status and its printed lines, never a piped `wc -l` — a pipeline's status is the last command's, so a half-finished listing used to look like a shorter playlist and download only a prefix. |
 | `fitness.py` | `yt -f`: interactive show/season picker, resolve on the media VM (season dir, next episode number, feed/course order), download + `SnnEnn` rename, nfo via `jellyfin_nfo.py`, optional Jellyfin scan; `--season-order`. `safe_show_name()` rejects a show name that is empty, holds a `/`, or starts with `.` or `-` — the show is the only user-supplied path component — and `split_target()` applies it. |
 | `jellyfin_nfo.py` | Stdlib-only script shipped over stdin to the media VM's `python3 -`; writes the episode `.nfo` and renames the thumbnail. Must not import from `yt`. Its `clean_overview()` is a copy of the one in proxmox-setup's `migrate.py` — keep them in step. |
@@ -63,8 +66,8 @@ auto-slugs with a confirm prompt and is framed as a movie library.
 Every remote script gets its inputs as `bash -s -- arg1 arg2 …` positional parameters, and `ssh.run_script()`
 quotes every one of them — for scripts, quoting really is handled in one place.
 
-**Ad-hoc `ssh()` command strings are the exception and must quote their own values.** Eleven call sites (in
-`cookies.py`, `session.py`, `single.py`, `playlist.py` and `fitness.py`) build a command with an f-string; every
+**Ad-hoc `ssh()` command strings are the exception and must quote their own values.** The call sites in
+`cookies.py`, `destination.py`, `session.py`, `single.py`, `playlist.py` and `fitness.py` build a command with an f-string; every
 embedded value there has to go through `ssh.q()`, and a value used as a `find -name` pattern also needs
 `ssh.id_glob()` so brackets stay literal. This paragraph used to claim the Python
 side never interpolates at all, which was not true of those call sites and is why two of them shipped an

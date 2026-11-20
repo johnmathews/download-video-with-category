@@ -38,7 +38,7 @@ def test_happy_path(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
         f"bash -s -- /tmp/yt.stub42 /tmp/yt.stub42/cookies.txt /mnt/nfs/downloads/yt-staging/yt.stub42 {URL}"
     )
     assert "yt-dlp" in dl.stdin
-    nas = next(c for c in media.calls if c.host == "nas")
+    nas = next(c for c in media.calls if c.host == "nas" and c.command.startswith("bash -s"))
     assert nas.command == "bash -s -- /mnt/swift/downloads/yt-staging/yt.stub42 /mnt/tank/movies/youtube/music"
     assert not any("rm -rf" in c for c in media.commands())
 
@@ -54,8 +54,8 @@ def test_duplicate_with_equal_quality_is_skipped_and_path_still_emitted(
     assert "Skipping download - existing file has equal or better quality" in err
     assert media.count("bash -s") == 0
     assert media.commands()[-1] == "rm -rf /tmp/yt.stub42 /mnt/nfs/downloads/yt-staging/yt.stub42 2>/dev/null || true"
-    find = next(c for c in media.commands() if c.startswith("find"))
-    assert find == f"find {FINAL} -type f -name '*\\[abcDEF12345\\]*' 2>/dev/null | head -1"
+    find = next(c for c in media.commands() if " find " in c)
+    assert find == f"[ ! -e {FINAL} ] || find {FINAL} -type f -name '*\\[abcDEF12345\\]*' -print -quit"
 
 
 def test_unknown_new_quality_refuses_to_claim_the_existing_file_is_better(
@@ -215,7 +215,7 @@ class TestSupersededFileRemoval:
     def test_does_not_delete_when_the_nas_transfer_failed(self, media: Any) -> None:
         """The new file never reached the library, so the old one is all there is."""
         self._upgrade(media, self.OLD)
-        media.rules.insert(0, lambda c: (1, "") if c.host == "nas" else None)
+        media.rules.insert(0, lambda c: (1, "") if c.host == "nas" and c.command.startswith("bash -s") else None)
         with pytest.raises(Failure):
             download_single("music", URL)
         assert "rm -f" not in " ".join(media.commands()), "deleted the old file after a failed transfer"

@@ -62,7 +62,7 @@ def test_downloads_every_item(media: Any, capsys: pytest.CaptureFixture[str]) ->
     assert out.count("/mnt/nfs/movies/youtube/test-playlist/001-fake-[id].mkv\n") == 3
     item = next(c for c in media.calls if c.host == "media" and c.command.startswith("bash -s"))
     assert item.command.endswith(f"'{URL}' 1 /mnt/nfs/movies/youtube/test-playlist/archive.txt")
-    nas = next(c for c in media.calls if c.host == "nas")
+    nas = next(c for c in media.calls if c.host == "nas" and c.command.startswith("bash -s"))
     assert nas.command == "bash -s -- /mnt/swift/downloads/yt-staging/yt.stub2 /mnt/tank/movies/youtube/test-playlist"
 
 
@@ -191,7 +191,7 @@ class TestStagingLifecycle:
     def test_nas_failure_keeps_every_staged_item_for_recovery(
         self, media: Any, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        media.rules.insert(0, lambda c: (1, "") if c.host == "nas" else None)
+        media.rules.insert(0, lambda c: (1, "") if c.host == "nas" and c.command.startswith("bash -s") else None)
 
         assert download_playlist(URL) == 1
         err = capsys.readouterr().err

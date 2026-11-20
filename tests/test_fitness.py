@@ -166,7 +166,7 @@ def test_fast_path_downloads_and_prints_final_path(media: Any, capsys: pytest.Ca
     helper = next(c for c in media.calls if "python3 -" in c.command)
     assert helper.command == "python3 - /mnt/nfs/downloads/yt-staging/yt.stub42 Kettlebell 3 10"
     assert helper.stdin and "jellyfin_nfo" in helper.stdin
-    nas = next(c for c in media.calls if c.host == "nas")
+    nas = next(c for c in media.calls if c.host == "nas" and c.command.startswith("bash -s"))
     assert (
         nas.command
         == "bash -s -- /mnt/swift/downloads/yt-staging/yt.stub42 '/mnt/tank/movies/youtube/fitness/Kettlebell/Season 03'"
@@ -230,7 +230,7 @@ def test_download_failure(media: Any, capsys: pytest.CaptureFixture[str]) -> Non
 
 
 def test_nas_failure_keeps_staging(media: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    media.rules.insert(0, lambda c: (1, "") if c.host == "nas" else None)
+    media.rules.insert(0, lambda c: (1, "") if c.host == "nas" and c.command.startswith("bash -s") else None)
     with pytest.raises(Failure):
         add_to_show("Kettlebell/3", URL)
     assert "NAS transfer failed" in capsys.readouterr().err

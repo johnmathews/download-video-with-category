@@ -6,6 +6,7 @@ import re
 
 from yt.config import MEDIA_HOST, NAS_FINAL_BASE, REMOTE_FINAL_BASE
 from yt.cookies import check_cookies, check_ytdlp_installed
+from yt.destination import check_destinations
 from yt.remote_scripts import PLAYLIST_ITEM_SCRIPT
 from yt.session import Session
 from yt.ssh import q, run_script, ssh
@@ -62,6 +63,7 @@ def _confirm_slug(suggested: str) -> str | None:
 def download_playlist(url: str) -> int:
     cookies = check_cookies()
     check_ytdlp_installed()
+    check_destinations()
 
     # One cookie upload for the whole run; each item gets its own tmp/staging dir.
     with Session("/tmp/yt.pl.XXXXXX").open() as cookie_session:

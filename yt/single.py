@@ -6,6 +6,7 @@ import re
 
 from yt.config import MEDIA_HOST, NAS_FINAL_BASE, REMOTE_FINAL_BASE, SUPPORTED_SITES, cookies_path
 from yt.cookies import check_cookies, check_ytdlp_installed
+from yt.destination import check_destinations
 from yt.remote_scripts import SINGLE_ITEM_SCRIPT
 from yt.session import Session
 from yt.ssh import id_glob, q, run_script, ssh
@@ -48,10 +49,22 @@ def _height(quality: str) -> int | None:
     return int(digits)
 
 
-def find_existing(final_dir: str, video_id: str) -> str:
-    """Path of an already-downloaded file carrying [video_id] in its name, or ''."""
-    result = ssh(MEDIA_HOST, f"find {q(final_dir)} -type f -name {q(id_glob(video_id))} 2>/dev/null | head -1")
-    return result.stdout.strip() if result.returncode == 0 else ""
+def find_existing(final_dir: str, video_id: str) -> str | None:
+    """Path of an already-downloaded file carrying [video_id] in its name, '' if there is none,
+    or None if the search failed without finding one.
+
+    A category directory that does not exist yet is "none" — the download script creates it.
+    The search used to end `2>/dev/null | head -1`, which took head's exit status and hid
+    find's errors, so an unreadable directory came back as "No existing download found".
+    find's stderr now reaches the terminal, and a failed search with no match is reported.
+    A match still counts when find also hit an error elsewhere in the tree.
+    """
+    d = q(final_dir)
+    result = ssh(MEDIA_HOST, f"[ ! -e {d} ] || find {d} -type f -name {q(id_glob(video_id))} -print -quit")
+    found = result.stdout.strip()
+    if found:
+        return found
+    return "" if result.returncode == 0 else None
 
 
 def _remove_superseded(path: str) -> bool:
@@ -78,6 +91,7 @@ def download_single(category: str, url: str) -> int:
     warn_if_unsupported_url(url)
     cookies = check_cookies()
     check_ytdlp_installed()
+    check_destinations()
 
     with Session().open() as session:
         session.upload_cookie(cookies)
@@ -107,6 +121,11 @@ def download_single(category: str, url: str) -> int:
         info(f"🔎 [{session.elapsed}] Checking for existing downloads...")
         superseded = ""  # a lower-quality file this run has committed to replacing
         existing = find_existing(remote_final_dir, video_id)
+        if existing is None:
+            info(f"❌ Could not search {remote_final_dir} for an existing download")
+            info("   Nothing was downloaded: going ahead without that check could duplicate or downgrade a file.")
+            session.cleanup()
+            raise Failure()
         if existing:
             info(f"⚠️  Found existing file: {existing.rsplit('/', 1)[-1]}")
             old_quality = existing_quality(existing)

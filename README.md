@@ -5,12 +5,15 @@ directories on the NFS-mounted movies dataset.
 
 ## How it works
 
-1. Copies browser cookies from your Mac to the media VM over SSH
-2. Runs yt-dlp on the media VM to download the video to `/tmp` (local disk)
-3. Embeds metadata, chapters, thumbnails, and English subtitles
-4. Stages the finished file to SSD NFS (`swift` pool) via rsync (~552 MB/s)
-5. SSHs to the NAS for a local copy from SSD to HDD (`tank` pool) via rsync (~1.6 GB/s)
-6. Cleans up temp and staging dirs
+1. Checks that the destination is readable and writable on both the media VM (over NFS) and the NAS, and stops
+   before downloading if it isn't — after a NAS restart its encrypted datasets stay locked until unlocked in
+   TrueNAS, which leaves the media VM's NFS mounts stale
+2. Copies browser cookies from your Mac to the media VM over SSH
+3. Runs yt-dlp on the media VM to download the video to `/tmp` (local disk)
+4. Embeds metadata, chapters, thumbnails, and English subtitles
+5. Stages the finished file to SSD NFS (`swift` pool) via rsync (~552 MB/s)
+6. SSHs to the NAS for a local copy from SSD to HDD (`tank` pool) via rsync (~1.6 GB/s)
+7. Cleans up temp and staging dirs
 
 Duplicate detection differs by mode: single-video mode compares quality via ffprobe and skips when the existing file
 is equal or better (and refuses to guess when either quality is unknown). On an upgrade the old file is deleted once

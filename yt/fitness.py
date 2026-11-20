@@ -227,13 +227,25 @@ def _fetch_info(cookie: str, url: str) -> tuple[str, str, str]:
     return parts[0], parts[1], parts[2]
 
 
-def _find_in_show(show_dir: str, video_id: str) -> str:
+def _find_in_show(show_dir: str, video_id: str) -> str | None:
+    """Path of a video in this show carrying [video_id] in its name, '' if there is none,
+    or None if the search failed without finding one.
+
+    Same contract as single.find_existing(), for the same reason: the search used to end
+    `2>/dev/null | head -1`, which took head's exit status and hid find's errors, so an
+    unreadable season directory read as "not in this show" and the video was downloaded
+    again as a new episode. find's stderr now reaches the terminal. A match still counts
+    when find also hit an error elsewhere in the show. No guard for a missing show_dir is
+    needed: resolve() has already created it.
+    """
     result = ssh(
         MEDIA_HOST,
-        f"find {q(show_dir)} -type f \\( -name '*.mkv' -o -name '*.mp4' \\) -name {q(id_glob(video_id))} "
-        "2>/dev/null | head -1",
+        f"find {q(show_dir)} -type f \\( -name '*.mkv' -o -name '*.mp4' \\) -name {q(id_glob(video_id))} -print -quit",
     )
-    return result.stdout.strip() if result.returncode == 0 else ""
+    found = result.stdout.strip()
+    if found:
+        return found
+    return "" if result.returncode == 0 else None
 
 
 def request_jellyfin_scan() -> None:
@@ -320,6 +332,11 @@ def add_to_show(target: str, url: str) -> int:
 
         if video_id != "unknown":
             existing = _find_in_show(resolved.show_dir, video_id)
+            if existing is None:
+                info(f"❌ Could not search {resolved.show_dir} for an existing copy")
+                info("   Nothing was downloaded: going ahead without that check could add the same video twice.")
+                session.cleanup(staging=False)
+                raise Failure()
             if existing:
                 info(f"⏭️  Already in this show: {existing.removeprefix(fitness_base + '/')}")
                 emit(existing)

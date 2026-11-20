@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,7 @@ import pytest
 
 from yt.fitness import (
     Resolved,
+    _find_in_show,
     add_to_show,
     ask_order,
     parse_listing,
@@ -219,6 +222,66 @@ def test_duplicate_in_show_is_skipped(media: Any, capsys: pytest.CaptureFixture[
     assert "Already in this show: Kettlebell/Season 02/Kettlebell S02E05 - old-[abcDEF12345].mkv" in err
     assert out.endswith("old-[abcDEF12345].mkv\n")
     assert media.count("bash -s", host="nas") == 0
+
+
+def test_failed_duplicate_search_stops_instead_of_reading_as_not_in_show(
+    media: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unreadable season used to read as "not in this show" and the video was added again."""
+    media.rules.insert(0, lambda c: (1, "") if c.command.startswith("find ") else None)
+    with pytest.raises(Failure):
+        add_to_show("Kettlebell/3", URL)
+    err = capsys.readouterr().err
+    assert f"❌ Could not search {BASE}/Kettlebell for an existing copy" in err
+    assert not any(c.stdin and "prefix=$(printf" in c.stdin for c in media.calls), "nothing downloaded"
+    assert media.count("bash -s", host="nas") == 0
+    assert media.commands()[-1] == "rm -rf /tmp/yt.stub42 2>/dev/null || true"
+
+
+def test_a_match_counts_even_if_find_also_hit_an_error(fake_ssh: Any) -> None:
+    hit = f"{BASE}/Kettlebell/Season 02/Kettlebell S02E05 - old-[abcDEF12345].mkv"
+    fake_ssh.on("find ", rc=1, stdout=f"{hit}\n")
+    assert _find_in_show(f"{BASE}/Kettlebell", "abcDEF12345") == hit
+
+
+class TestFindInShowForReal:
+    """The generated command run under a real /bin/sh against a temp show tree."""
+
+    def _run(self, fake_ssh: Any, show: Path) -> subprocess.CompletedProcess[str]:
+        _find_in_show(str(show), "abcDEF12345")
+        return subprocess.run(
+            ["/bin/sh", "-c", fake_ssh.calls[-1].command], capture_output=True, text=True, check=False
+        )
+
+    @pytest.fixture
+    def show(self, tmp_path: Path) -> Path:
+        for season in ("Season 01", "Season 02"):
+            (tmp_path / "Kettlebell" / season).mkdir(parents=True)
+        (tmp_path / "Kettlebell" / "Season 01" / "Kettlebell S01E01 - x-[zzz].mkv").write_text("x")
+        return tmp_path / "Kettlebell"
+
+    def test_finds_the_video_in_any_season(self, fake_ssh: Any, show: Path) -> None:
+        hit = show / "Season 02" / "Kettlebell S02E05 - old-[abcDEF12345].mp4"
+        hit.write_text("x")
+        (show / "Season 02" / "Kettlebell S02E05 - old-[abcDEF12345]-thumb.jpg").write_text("x")
+        result = self._run(fake_ssh, show)
+        assert (result.returncode, result.stdout.strip()) == (0, str(hit))
+
+    def test_not_in_show(self, fake_ssh: Any, show: Path) -> None:
+        result = self._run(fake_ssh, show)
+        assert (result.returncode, result.stdout) == (0, "")
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root can read anything")
+    def test_unreadable_season_fails_rather_than_reading_as_absent(self, fake_ssh: Any, show: Path) -> None:
+        locked = show / "Season 02"
+        locked.chmod(0o000)
+        try:
+            result = self._run(fake_ssh, show)
+        finally:
+            locked.chmod(0o755)
+        assert result.returncode != 0
+        assert result.stdout == ""
+        assert "Permission denied" in result.stderr
 
 
 def test_download_failure(media: Any, capsys: pytest.CaptureFixture[str]) -> None:

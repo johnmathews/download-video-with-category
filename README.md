@@ -127,7 +127,8 @@ What it does for you:
   to the media VM over stdin (python3, stdlib only);
 - creates the show (`tvshow.nfo`) and/or season (`season.nfo` with the name) when you choose
   "new";
-- refuses duplicates already anywhere in that show (by YouTube id);
+- refuses duplicates already anywhere in that show (by YouTube id), and stops rather than guessing if
+  it cannot search the show;
 - if `JELLYFIN_URL` and `JELLYFIN_API_KEY` are set, asks Jellyfin to scan now; otherwise the
   scheduled scan picks it up.
 
@@ -198,7 +199,7 @@ season numbering, the zsh→Python port, and the 2026-09-04 pass that retired `-
 
 ```sh
 uv sync
-uv run python -m pytest --cov=yt   # 210 tests, no SSH needed (ssh is faked in tests/conftest.py)
+uv run python -m pytest --cov=yt   # 243 tests, no SSH needed (ssh is faked in tests/conftest.py)
 uv run ruff check . && uv run ruff format --check .
 uv run pyright
 ```

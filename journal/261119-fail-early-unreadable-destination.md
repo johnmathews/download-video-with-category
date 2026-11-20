@@ -39,7 +39,7 @@ On 2026-11-19 at 22:54:30 CET the TrueNAS VM crashed and reset itself (most like
 
 `fitness._find_in_show` has the same `2>/dev/null | head -1` shape. The preflight covers its base directory,
 so the incident case is caught; the narrower case (one unreadable show directory) still reads as "not in this
-show".
+show". Fixed the next day: see [261120-fitness-duplicate-search](261120-fitness-duplicate-search.md).
 
 ## 4. Verified
 
